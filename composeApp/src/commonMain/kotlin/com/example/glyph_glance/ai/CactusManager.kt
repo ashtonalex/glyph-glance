@@ -9,7 +9,7 @@ import kotlinx.serialization.json.Json
 class CactusManager {
     
     // Toggle this to FALSE when testing on a real device with the model downloaded
-    private val USE_MOCK = false // Changed to false as per user request
+    private val USE_MOCK = true // Set to true to avoid Cactus SDK initialization issues during development
 
     private val cactusLM = CactusLM()
     private val modelSlug = "qwen3-0.6"

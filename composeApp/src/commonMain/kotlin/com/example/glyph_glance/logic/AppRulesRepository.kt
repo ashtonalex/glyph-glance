@@ -9,11 +9,11 @@ class AppRulesRepository(
     private val cactusManager: CactusManager, 
     private val ruleDao: RuleDao
 ) : RulesRepository {
-    override suspend fun addNaturalLanguageRule(userText: String) {
+    override suspend fun addNaturalLanguageRule(text: String) {
         // 1. Ask AI to convert text -> JSON
-        val json = cactusManager.translateRule(userText)
+        val json = cactusManager.translateRule(text)
         // 2. Save to DB
-        ruleDao.insert(Rule(rawInstruction = userText, jsonLogic = json))
+        ruleDao.insert(Rule(rawInstruction = text, jsonLogic = json))
     }
     
     override fun getRulesFlow(): Flow<List<Rule>> = ruleDao.getAllRulesFlow()
