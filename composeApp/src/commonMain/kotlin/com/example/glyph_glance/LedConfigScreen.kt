@@ -22,6 +22,10 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun LedConfigScreen() {
+    var brightness by remember { mutableStateOf(0.8f) }
+    var pulseSpeed by remember { mutableStateOf(0.5f) }
+    var syncWithMusic by remember { mutableStateOf(true) }
+    
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -51,9 +55,17 @@ fun LedConfigScreen() {
         Spacer(modifier = Modifier.height(32.dp))
 
         // Controls
-        ConfigOption(title = "Brightness", value = 0.8f)
+        ConfigOption(
+            title = "Brightness",
+            value = brightness,
+            onValueChange = { brightness = it }
+        )
         Spacer(modifier = Modifier.height(16.dp))
-        ConfigOption(title = "Pulse Speed", value = 0.5f)
+        ConfigOption(
+            title = "Pulse Speed",
+            value = pulseSpeed,
+            onValueChange = { pulseSpeed = it }
+        )
         
         Spacer(modifier = Modifier.height(24.dp))
         
@@ -64,8 +76,8 @@ fun LedConfigScreen() {
         ) {
             Text("Sync with Music", color = TextWhite, style = MaterialTheme.typography.bodyLarge)
             Switch(
-                checked = true,
-                onCheckedChange = {},
+                checked = syncWithMusic,
+                onCheckedChange = { syncWithMusic = it },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = NeonBlue,
                     checkedTrackColor = NeonBlue.copy(alpha = 0.5f)
@@ -115,13 +127,13 @@ fun LedVisualizer() {
 val NeonWhite = Color(0xFFFFFFFF)
 
 @Composable
-fun ConfigOption(title: String, value: Float) {
+fun ConfigOption(title: String, value: Float, onValueChange: (Float) -> Unit) {
     Column {
         Text(title, color = TextGrey, style = MaterialTheme.typography.bodyMedium)
         Spacer(modifier = Modifier.height(8.dp))
         Slider(
             value = value,
-            onValueChange = {},
+            onValueChange = onValueChange,
             colors = SliderDefaults.colors(
                 thumbColor = NeonBlue,
                 activeTrackColor = NeonBlue,
