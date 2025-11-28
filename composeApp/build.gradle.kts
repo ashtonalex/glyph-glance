@@ -37,6 +37,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.android)
         }
         commonMain.dependencies {
+            implementation("com.cactuscompute:cactus:1.2.0-beta")
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)

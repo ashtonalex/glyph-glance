@@ -8,12 +8,3 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform) apply false
 }
 
-kotlin {
-    sourceSets {
-        commonMain {
-            dependencies {
-                implementation("com.cactuscompute:cactus:1.2.0-beta")
-            }
-        }
-    }
-}
