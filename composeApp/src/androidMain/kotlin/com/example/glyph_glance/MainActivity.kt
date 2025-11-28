@@ -12,11 +12,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         
-        // Initialize Cactus SDK
-        com.cactus.CactusContextInitializer.initialize(this)
+        try {
+            // Initialize Cactus SDK
+            com.cactus.CactusContextInitializer.initialize(this)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to initialize Cactus SDK", e)
+            // Continue anyway - will use mock mode
+        }
         
-        // Initialize DI
-        com.example.glyph_glance.di.AppModule.initialize(this)
+        try {
+            // Initialize DI
+            com.example.glyph_glance.di.AppModule.initialize(this)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to initialize AppModule", e)
+            // Crash with proper error message
+            throw RuntimeException("Failed to initialize app: ${e.message}", e)
+        }
 
         setContent {
             App()

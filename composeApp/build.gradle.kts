@@ -34,6 +34,7 @@ kotlin {
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
+            implementation(libs.kotlinx.coroutines.android)
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -91,5 +92,15 @@ room {
 
 dependencies {
     debugImplementation(compose.uiTooling)
+    add("kspAndroid", libs.room.compiler)
+    add("kspIosSimulatorArm64", libs.room.compiler)
+    add("kspIosArm64", libs.room.compiler)
+}
+
+// Fix KSP task dependencies on Compose resource generation
+tasks.withType<com.google.devtools.ksp.gradle.KspAATask>().configureEach {
+    dependsOn(tasks.matching { 
+        it.name.startsWith("generate") && (it.name.contains("Resource") || it.name.contains("ResClass") || it.name.contains("Collector"))
+    })
 }
 

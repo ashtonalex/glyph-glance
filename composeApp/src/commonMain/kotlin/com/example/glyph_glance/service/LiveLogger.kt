@@ -1,0 +1,36 @@
+package com.example.glyph_glance.service
+
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+/**
+ * Singleton logger for real-time log streaming to UI.
+ * Used by Track 2 (services) to write logs and Track 3 (UI) to observe them.
+ */
+object LiveLogger {
+    private val _logs = MutableStateFlow<List<String>>(emptyList())
+    val logs: StateFlow<List<String>> = _logs.asStateFlow()
+    
+    private const val MAX_LOGS = 1000
+    
+    /**
+     * Add a log entry. Automatically trims old logs if exceeding MAX_LOGS.
+     */
+    fun addLog(message: String) {
+        val timestamp = System.currentTimeMillis()
+        val logEntry = "[$timestamp] $message"
+        
+        val currentLogs = _logs.value
+        val newLogs = (currentLogs + logEntry).takeLast(MAX_LOGS)
+        _logs.value = newLogs
+    }
+    
+    /**
+     * Clear all logs.
+     */
+    fun clear() {
+        _logs.value = emptyList()
+    }
+}
+
