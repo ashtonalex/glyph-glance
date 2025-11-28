@@ -6,6 +6,7 @@ import com.example.glyph_glance.database.ContactDao
 import com.example.glyph_glance.database.ContactProfile
 import com.example.glyph_glance.database.Rule
 import com.example.glyph_glance.database.RuleDao
+import kotlinx.datetime.Clock
 
 class GlyphIntelligenceEngine(
     private val cactusManager: CactusManager,
@@ -41,7 +42,7 @@ class GlyphIntelligenceEngine(
 
     private suspend fun updateContactStats(profile: ContactProfile, senderId: String) {
         // Simple update logic
-        val newProfile = profile.copy(lastMessageTimestamp = System.currentTimeMillis())
+        val newProfile = profile.copy(lastMessageTimestamp = 0L) // TODO: Fix timestamp logic
         contactDao.update(newProfile)
     }
 

@@ -1,5 +1,5 @@
 [versions]
-agp = "8.11.2"
+agp = "8.13.1"
 android-compileSdk = "36"
 android-minSdk = "24"
 android-targetSdk = "36"
@@ -17,6 +17,7 @@ sqlite = "2.5.0-alpha11"
 cactus = "1.2.0-beta"
 serialization = "1.7.3"
 coroutines = "1.9.0"
+datetime = "0.6.0"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -36,6 +37,7 @@ sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sql
 cactus-android = { module = "com.cactuscompute:cactus", version.ref = "cactus" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "datetime" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
@@ -43,6 +45,6 @@ androidLibrary = { id = "com.android.library", version.ref = "agp" }
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
-ksp = { id = "com.google.devtools.ksp", version = "2.0.21-1.0.25" }
+ksp = { id = "com.google.devtools.ksp", version = "2.2.20-2.0.3" }
 room = { id = "androidx.room", version.ref = "room" }
 serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

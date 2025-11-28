@@ -1,9 +1,9 @@
 package com.example.glyph_glance.ai
 
 import com.cactus.CactusLM
-import com.cactus.models.CactusInitParams
-import com.cactus.models.ChatMessage
-import com.cactus.models.CactusCompletionParams
+import com.cactus.CactusInitParams
+import com.cactus.ChatMessage
+import com.cactus.CactusCompletionParams
 import kotlinx.serialization.json.Json
 
 class CactusManager {
@@ -33,7 +33,7 @@ class CactusManager {
 
         return if (result?.success == true) {
             try {
-                val jsonString = result.response.trim()
+                val jsonString = result.response?.trim() ?: ""
                 // Simple parsing or use kotlinx.serialization if response is clean JSON
                 // For robustness, let's assume the model returns valid JSON or we might need regex
                 // Here we'll do a basic manual parse or use a helper
