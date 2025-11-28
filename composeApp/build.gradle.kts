@@ -91,5 +91,19 @@ room {
 
 dependencies {
     debugImplementation(compose.uiTooling)
+    add("kspAndroid", libs.room.compiler)
 }
 
+// Fix KSP task dependency issues with Compose resources
+afterEvaluate {
+    tasks.matching { it.name.startsWith("ksp") && it.name.contains("Android") }.configureEach {
+        dependsOn(
+            tasks.named("generateComposeResClass"),
+            tasks.named("generateResourceAccessorsForAndroidDebug"),
+            tasks.named("generateResourceAccessorsForAndroidMain"),
+            tasks.named("generateActualResourceCollectorsForAndroidMain"),
+            tasks.named("generateResourceAccessorsForCommonMain"),
+            tasks.named("generateExpectResourceCollectorsForCommonMain")
+        )
+    }
+}
