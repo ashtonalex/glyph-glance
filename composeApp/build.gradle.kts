@@ -35,6 +35,7 @@ kotlin {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.datastore.preferences)
+            implementation(files("libs/glyph-matrix-sdk-1.0.aar"))
         }
         commonMain.dependencies {
             implementation(compose.runtime)

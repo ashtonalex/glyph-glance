@@ -72,11 +72,7 @@ NOTIFICATION_PRESETS = {
         ("Discord", "New message in #general", 2, "SOCIAL"),
     ],
     "passive": [
-        ("Amazon", "Your order #81234 has shipped and will arrive tomorrow", 2, "INFO"),
-        ("Calendar", "Reminder: Team standup in 30 minutes", 3, "INFO"),
-        ("Weather", "Rain expected this afternoon. Bring an umbrella!", 1, "INFO"),
-        ("Netflix", "New episode of your show is now available", 1, "INFO"),
-        ("Spotify", "Your Daily Mix is ready", 1, "INFO"),
+        ("e", "e", 0, "e"),
     ],
     "noise": [
         ("PromoDeals", "🔥 FLASH SALE! 50% OFF everything!", 1, "NOISE"),
