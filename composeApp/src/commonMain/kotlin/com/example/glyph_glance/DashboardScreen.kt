@@ -1252,7 +1252,6 @@ fun AddAppDialog(
     onAdd: (String, String, NotificationPriority) -> Unit
 ) {
     var appName by remember { mutableStateOf("") }
-    var packageName by remember { mutableStateOf("") }
     var selectedPriority by remember { mutableStateOf(NotificationPriority.HIGH) }
     
     AlertDialog(
@@ -1265,22 +1264,6 @@ fun AddAppDialog(
                     onValueChange = { appName = it },
                     label = { Text("App Name") },
                     placeholder = { Text("e.g., WhatsApp") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextWhite,
-                        unfocusedTextColor = TextWhite,
-                        focusedBorderColor = getThemeMediumPriority(),
-                        unfocusedBorderColor = TextGrey
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                OutlinedTextField(
-                    value = packageName,
-                    onValueChange = { packageName = it },
-                    label = { Text("Package Name") },
-                    placeholder = { Text("e.g., com.whatsapp") },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = TextWhite,
                         unfocusedTextColor = TextWhite,
@@ -1322,8 +1305,8 @@ fun AddAppDialog(
         confirmButton = {
             TextButton(
                 onClick = { 
-                    if (appName.isNotBlank() && packageName.isNotBlank()) {
-                        onAdd(packageName, appName, selectedPriority)
+                    if (appName.isNotBlank()) {
+                        onAdd("", appName, selectedPriority)
                     }
                 }
             ) {
