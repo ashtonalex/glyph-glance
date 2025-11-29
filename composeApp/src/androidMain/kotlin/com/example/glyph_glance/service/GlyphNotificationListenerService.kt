@@ -152,24 +152,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 // User keywords take priority over pre-defined semantics
                 val userKeywords = keywordRules.map { it.keyword }
                 
-
-                // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
-                // This will wait for the 5-second buffering window
-                val decision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
-                
-                // If notification was buffered (superseded by a newer one), stop processing here
-                if (decision.isBuffered) {
-                    Log.d(TAG, "Notification buffered/superseded: $title from $appName - Skipping save/notify")
-                    // Decrement queuing counter for buffered notification
-                    LiveLogger.decrementQueuing()
-                    return@launch
-                }
-                
-                // Now that buffering is complete, transition from "Queuing" to "Thinking"
-                LiveLogger.decrementQueuing()
-                LiveLogger.setProcessingNotification(true)
-
-                // Calculate preference priority for database storage (but NOT for glyph flashing)
+                // Calculate preference priority first to check for urgency 6
                 val preferencePriority = calculatePriority(
                     text = fullText,
                     appPackage = sbn.packageName,
@@ -180,17 +163,59 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 )
                 val preferenceUrgencyScore = preferencePriority.toUrgencyScore()
                 
-                // For database: combine AI urgency with preference rules (take maximum)
-                val finalUrgencyScoreForDb = maxOf(decision.urgencyScore, preferenceUrgencyScore)
-                val finalPriority = NotificationPriority.fromUrgencyScore(finalUrgencyScoreForDb)
+                // Process decision - skip AI if urgency 6 keyword found
+                val finalUrgencyScore: Int
+                val finalPriority: NotificationPriority
+                val decision: DecisionResult
                 
-                // For glyph flashing: use ONLY the LLM urgency score (ignore preference rules)
-                val llmUrgencyScore = decision.urgencyScore
-                val shouldLightUp = llmUrgencyScore >= 4 || decision.triggeredRuleId != null
-                val finalPattern = when {
-                    llmUrgencyScore >= 5 -> GlyphPattern.URGENT
-                    llmUrgencyScore >= 4 || decision.triggeredRuleId != null -> GlyphPattern.AMBER_BREATHE
-                    else -> GlyphPattern.NONE
+                if (preferenceUrgencyScore >= 6) {
+                    // Instant priority - skip AI processing entirely
+                    Log.d(TAG, "Urgency 6 keyword detected: $appName - skipping AI for instant priority")
+                    
+                    // Transition from "Queuing" to "Thinking" (briefly)
+                    LiveLogger.decrementQueuing()
+                    LiveLogger.setProcessingNotification(true)
+                    
+                    LiveLogger.addLog(
+                        type = com.example.glyph_glance.logging.LogType.AI_RESPONSE,
+                        message = "⚡ Instant Priority: $appName (urgency → 6, AI skipped)",
+                        status = com.example.glyph_glance.logging.LogStatus.INFO
+                    )
+                    
+                    finalUrgencyScore = 6
+                    finalPriority = NotificationPriority.HIGH
+                    decision = DecisionResult(
+                        shouldLightUp = true,
+                        pattern = GlyphPattern.URGENT,
+                        urgencyScore = 6,
+                        sentiment = "URGENT",
+                        rawAiResponse = "[Urgency 6 keyword detected - AI analysis skipped for instant priority]",
+                        triggeredRuleId = null,
+                        semanticMatched = false,
+                        semanticCategories = emptySet(),
+                        semanticBoost = 0
+                    )
+                } else {
+                    // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
+                    // This will wait for the 5-second buffering window
+                    val engineDecision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
+                    
+                    // If notification was buffered (superseded by a newer one), stop processing here
+                    if (engineDecision.isBuffered) {
+                        Log.d(TAG, "Notification buffered/superseded: $title from $appName - Skipping save/notify")
+                        LiveLogger.decrementQueuing()
+                        return@launch
+                    }
+                    
+                    // Now that buffering is complete, transition from "Queuing" to "Thinking"
+                    LiveLogger.decrementQueuing()
+                    LiveLogger.setProcessingNotification(true)
+                    
+                    decision = engineDecision
+                    
+                    // Combine AI urgency with preference rules (take maximum)
+                    finalUrgencyScore = maxOf(decision.urgencyScore, preferenceUrgencyScore)
+                    finalPriority = NotificationPriority.fromUrgencyScore(finalUrgencyScore)
                 }
                 
                 Log.d(TAG, "Flagging check - LLM Urgency Score: $llmUrgencyScore (used for glyph), " +
