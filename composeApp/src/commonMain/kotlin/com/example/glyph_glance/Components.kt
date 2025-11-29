@@ -69,7 +69,9 @@ fun NotificationItem(
     message: String,
     time: String,
     importanceColor: Color,
-    icon: ImageVector? = null
+    icon: ImageVector? = null,
+    sentiment: String? = null,
+    urgencyScore: Int? = null
 ) {
     Row(
         modifier = Modifier
@@ -114,6 +116,34 @@ fun NotificationItem(
                 color = TextGrey,
                 maxLines = 1
             )
+            // Sentiment and urgency display
+            if (sentiment != null || urgencyScore != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    sentiment?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = when (it.uppercase()) {
+                                "POSITIVE" -> Color(0xFF34C759) // Green
+                                "NEGATIVE" -> Color(0xFFFF3B30) // Red
+                                else -> TextGrey
+                            },
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    urgencyScore?.let {
+                        Text(
+                            text = "Urgency: $it/5",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextGrey
+                        )
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.width(8.dp))

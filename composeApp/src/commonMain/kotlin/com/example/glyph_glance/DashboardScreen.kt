@@ -59,7 +59,9 @@ data class ActivityNotification(
     val time: String,
     val minutesAgo: Int,
     val priority: NotificationPriority,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val sentiment: String? = null,
+    val urgencyScore: Int? = null
 )
 
 @Composable
@@ -92,16 +94,16 @@ fun DashboardScreen() {
     // Sample notification data with timestamps
     val allNotifications = remember {
         listOf(
-            ActivityNotification("Message from Alex", "Hey, are we still on for tonight?", "1m ago", 1, NotificationPriority.HIGH, Icons.Default.Star),
-            ActivityNotification("Email from Work", "Meeting reminder at 3 PM", "3m ago", 3, NotificationPriority.MEDIUM, Icons.Default.Person),
-            ActivityNotification("Social Update", "You have 5 new followers", "5m ago", 5, NotificationPriority.LOW, Icons.Default.Notifications),
-            ActivityNotification("Urgent Alert", "System update required", "7m ago", 7, NotificationPriority.HIGH, Icons.Default.Star),
-            ActivityNotification("News Update", "Breaking news in your area", "10m ago", 10, NotificationPriority.MEDIUM, Icons.Default.Person),
-            ActivityNotification("Weather Alert", "Rain expected this afternoon", "12m ago", 12, NotificationPriority.LOW, Icons.Default.Notifications),
-            ActivityNotification("Important Message", "Payment due tomorrow", "15m ago", 15, NotificationPriority.HIGH, Icons.Default.Star),
-            ActivityNotification("Calendar Event", "Team meeting in 30 minutes", "18m ago", 18, NotificationPriority.MEDIUM, Icons.Default.Person),
-            ActivityNotification("App Notification", "New feature available", "20m ago", 20, NotificationPriority.LOW, Icons.Default.Notifications),
-            ActivityNotification("Critical Update", "Security patch available", "25m ago", 25, NotificationPriority.HIGH, Icons.Default.Star)
+            ActivityNotification("Message from Alex", "Hey, are we still on for tonight?", "1m ago", 1, NotificationPriority.HIGH, Icons.Default.Star, "POSITIVE", 2),
+            ActivityNotification("Email from Work", "Meeting reminder at 3 PM", "3m ago", 3, NotificationPriority.MEDIUM, Icons.Default.Person, "NEUTRAL", 3),
+            ActivityNotification("Social Update", "You have 5 new followers", "5m ago", 5, NotificationPriority.LOW, Icons.Default.Notifications, "POSITIVE", 1),
+            ActivityNotification("Urgent Alert", "System update required", "7m ago", 7, NotificationPriority.HIGH, Icons.Default.Star, "NEUTRAL", 4),
+            ActivityNotification("News Update", "Breaking news in your area", "10m ago", 10, NotificationPriority.MEDIUM, Icons.Default.Person, "NEUTRAL", 3),
+            ActivityNotification("Weather Alert", "Rain expected this afternoon", "12m ago", 12, NotificationPriority.LOW, Icons.Default.Notifications, "NEUTRAL", 2),
+            ActivityNotification("Important Message", "Payment due tomorrow", "15m ago", 15, NotificationPriority.HIGH, Icons.Default.Star, "NEGATIVE", 4),
+            ActivityNotification("Calendar Event", "Team meeting in 30 minutes", "18m ago", 18, NotificationPriority.MEDIUM, Icons.Default.Person, "NEUTRAL", 3),
+            ActivityNotification("App Notification", "New feature available", "20m ago", 20, NotificationPriority.LOW, Icons.Default.Notifications, "POSITIVE", 1),
+            ActivityNotification("Critical Update", "Security patch available", "25m ago", 25, NotificationPriority.HIGH, Icons.Default.Star, "NEUTRAL", 5)
         )
     }
     
@@ -270,7 +272,9 @@ fun DashboardScreen() {
                                     message = notification.message,
                                     time = notification.time,
                                     importanceColor = importanceColor,
-                                    icon = notification.icon
+                                    icon = notification.icon,
+                                    sentiment = notification.sentiment,
+                                    urgencyScore = notification.urgencyScore
                                 )
                                 if (index < filteredNotifications.size - 1) {
                                     Spacer(modifier = Modifier.height(8.dp))
