@@ -301,16 +301,33 @@ fun DashboardScreen() {
                             finalUrgencyScore = null
                             rulesMatched = false
                             try {
-                                // Step 1: Perform sentiment analysis
-                                val analysisResult = sentimentAnalysisService.analyzeNotification(
-                                    content = testInput,
-                                    senderId = testSender
-                                )
-                                testResult = analysisResult
-                                
-                                // Step 2: Check keyword and app rules
+                                // Step 1: Check keyword and app rules first
                                 val keywordRules = prefsManager.getKeywordRules()
                                 val appRules = prefsManager.getAppRules()
+                                
+                                // Check if this app is ignored - skip AI and assign urgency 1
+                                val isAppIgnored = appRules.any { rule ->
+                                    rule.isIgnored && rule.appName.equals(testSender, ignoreCase = true)
+                                }
+                                
+                                val analysisResult: AnalysisResult?
+                                
+                                if (isAppIgnored) {
+                                    // Skip AI analysis for ignored apps
+                                    analysisResult = AnalysisResult(
+                                        urgencyScore = 1,
+                                        sentiment = "NEUTRAL",
+                                        triggeredRuleId = null,
+                                        rawAiResponse = "[App Ignored - AI analysis skipped]"
+                                    )
+                                } else {
+                                    // Step 2: Perform sentiment analysis (only for non-ignored apps)
+                                    analysisResult = sentimentAnalysisService.analyzeNotification(
+                                        content = testInput,
+                                        senderId = testSender
+                                    )
+                                }
+                                testResult = analysisResult
                                 
                                 // Step 3: Calculate priority based on rules
                                 // Pass both package name and app name so app rules can match by either
@@ -329,7 +346,10 @@ fun DashboardScreen() {
                                 val rulesMatchedValue = ruleBasedPriority != basePriority
                                 rulesMatched = rulesMatchedValue
                                 
-                                val finalUrgencyScoreValue = if (rulesMatchedValue) {
+                                val finalUrgencyScoreValue = if (isAppIgnored) {
+                                    // Ignored apps always get urgency 1
+                                    1
+                                } else if (rulesMatchedValue) {
                                     // If rules matched, use the maximum of AI score and rule-based score
                                     // This ensures AI score is never lowered, but rules can increase it
                                     val ruleBasedUrgencyScore = ruleBasedPriority.toUrgencyScore()
@@ -654,8 +674,8 @@ fun DashboardScreen() {
                         prefsManager.saveAppRules(appRules)
                     }
                 },
-                onAdd = { packageName, appName, priority ->
-                    appRules = appRules + AppRule(packageName, appName, priority)
+                onAdd = { packageName, appName, priority, isIgnored ->
+                    appRules = appRules + AppRule(packageName, appName, priority, isIgnored)
                     coroutineScope.launch {
                         prefsManager.saveAppRules(appRules)
                     }
@@ -681,8 +701,8 @@ fun DashboardScreen() {
     if (showAddAppDialog) {
         AddAppDialog(
             onDismiss = { showAddAppDialog = false },
-            onAdd = { packageName: String, appName: String, priority: NotificationPriority ->
-                appRules = appRules + AppRule(packageName, appName, priority)
+            onAdd = { packageName: String, appName: String, priority: NotificationPriority, isIgnored: Boolean ->
+                appRules = appRules + AppRule(packageName, appName, priority, isIgnored)
                 coroutineScope.launch {
                     prefsManager.saveAppRules(appRules)
                 }
@@ -1163,7 +1183,7 @@ fun AppsSection(
     onExpandedChange: (Boolean) -> Unit,
     onAddClick: () -> Unit,
     onDelete: (AppRule) -> Unit,
-    onAdd: (String, String, NotificationPriority) -> Unit
+    onAdd: (String, String, NotificationPriority, Boolean) -> Unit
 ) {
     val themeColors = LocalThemeColors.current
     
@@ -1308,23 +1328,47 @@ fun AppRuleItem(rule: AppRule, onDelete: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceDarkGrey.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+            .background(
+                if (rule.isIgnored) Color(0xFF2A1A1A) else SurfaceDarkGrey.copy(alpha = 0.6f), 
+                RoundedCornerShape(12.dp)
+            )
+            .border(
+                1.dp, 
+                if (rule.isIgnored) Color(0xFFFF3B30).copy(alpha = 0.3f) else Color.White.copy(alpha = 0.1f), 
+                RoundedCornerShape(12.dp)
+            )
             .padding(16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = rule.appName,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (rule.isIgnored) TextGrey else TextWhite,
+                    fontWeight = FontWeight.Bold
+                )
+                if (rule.isIgnored) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFFFF3B30).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "IGNORED",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFFF3B30),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
             Text(
-                text = rule.appName,
-                style = MaterialTheme.typography.titleMedium,
-                color = TextWhite,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Priority: ${rule.priority.name}",
+                text = if (rule.isIgnored) "All notifications blocked" else "Priority: ${rule.priority.name}",
                 style = MaterialTheme.typography.bodySmall,
-                color = when (rule.priority) {
+                color = if (rule.isIgnored) TextGrey else when (rule.priority) {
                     NotificationPriority.HIGH -> getThemeHighPriority()
                     NotificationPriority.MEDIUM -> getThemeMediumPriority()
                     NotificationPriority.LOW -> getThemeLowPriority()
@@ -1410,10 +1454,11 @@ fun AddKeywordDialog(
 @Composable
 fun AddAppDialog(
     onDismiss: () -> Unit,
-    onAdd: (String, String, NotificationPriority) -> Unit
+    onAdd: (String, String, NotificationPriority, Boolean) -> Unit
 ) {
     var appName by remember { mutableStateOf("") }
     var selectedPriority by remember { mutableStateOf(NotificationPriority.HIGH) }
+    var isIgnored by remember { mutableStateOf(false) }
     
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1436,29 +1481,60 @@ fun AddAppDialog(
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                Text("Priority Level:", color = TextGrey)
+                // Ignore toggle
                 Row(
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    NotificationPriority.values().forEach { priority ->
-                        Spacer(modifier = Modifier.width(8.dp))
-                        FilterChip(
-                            selected = selectedPriority == priority,
-                            onClick = { selectedPriority = priority },
-                            label = { Text(priority.name) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = when (priority) {
-                                    NotificationPriority.HIGH -> getThemeHighPriority().copy(alpha = 0.3f)
-                                    NotificationPriority.MEDIUM -> getThemeMediumPriority().copy(alpha = 0.3f)
-                                    NotificationPriority.LOW -> getThemeLowPriority().copy(alpha = 0.3f)
-                                },
-                                selectedLabelColor = when (priority) {
-                                    NotificationPriority.HIGH -> getThemeHighPriority()
-                                    NotificationPriority.MEDIUM -> getThemeMediumPriority()
-                                    NotificationPriority.LOW -> getThemeLowPriority()
-                                }
-                            )
+                    Column {
+                        Text("Ignore this app", color = TextWhite)
+                        Text(
+                            "Completely block all notifications",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextGrey
                         )
+                    }
+                    Switch(
+                        checked = isIgnored,
+                        onCheckedChange = { isIgnored = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = TextWhite,
+                            checkedTrackColor = Color(0xFFFF3B30), // Red for ignore
+                            uncheckedThumbColor = TextGrey,
+                            uncheckedTrackColor = SurfaceDarkGrey
+                        )
+                    )
+                }
+                
+                // Only show priority selection if not ignored
+                if (!isIgnored) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text("Priority Level:", color = TextGrey)
+                    Row(
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        NotificationPriority.values().forEach { priority ->
+                            Spacer(modifier = Modifier.width(8.dp))
+                            FilterChip(
+                                selected = selectedPriority == priority,
+                                onClick = { selectedPriority = priority },
+                                label = { Text(priority.name) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = when (priority) {
+                                        NotificationPriority.HIGH -> getThemeHighPriority().copy(alpha = 0.3f)
+                                        NotificationPriority.MEDIUM -> getThemeMediumPriority().copy(alpha = 0.3f)
+                                        NotificationPriority.LOW -> getThemeLowPriority().copy(alpha = 0.3f)
+                                    },
+                                    selectedLabelColor = when (priority) {
+                                        NotificationPriority.HIGH -> getThemeHighPriority()
+                                        NotificationPriority.MEDIUM -> getThemeMediumPriority()
+                                        NotificationPriority.LOW -> getThemeLowPriority()
+                                    }
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -1467,7 +1543,7 @@ fun AddAppDialog(
             TextButton(
                 onClick = { 
                     if (appName.isNotBlank()) {
-                        onAdd("", appName, selectedPriority)
+                        onAdd("", appName, selectedPriority, isIgnored)
                     }
                 }
             ) {
