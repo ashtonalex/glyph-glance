@@ -34,11 +34,7 @@ kotlin {
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
-<<<<<<< HEAD
-            implementation(libs.kotlinx.coroutines.android)
-=======
             implementation(libs.androidx.datastore.preferences)
->>>>>>> 3a6f6d32c69861e74369ffd10e65714eb83c7c06
         }
         commonMain.dependencies {
             implementation("com.cactuscompute:cactus:1.2.0-beta")

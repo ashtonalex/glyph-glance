@@ -6,6 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
+import com.example.glyph_glance.di.AppModule
+import com.example.glyph_glance.service.LiveLogger
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -22,15 +24,29 @@ class MainActivity : ComponentActivity() {
         
         try {
             // Initialize DI
-            com.example.glyph_glance.di.AppModule.initialize(this)
+            AppModule.initialize(this)
+            LiveLogger.addLog("App initialized successfully")
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Failed to initialize AppModule", e)
-            // Crash with proper error message
-            throw RuntimeException("Failed to initialize app: ${e.message}", e)
+            // Don't crash - allow app to run with limited functionality
+            LiveLogger.addLog("ERROR: Failed to initialize - ${e.message}")
         }
+        
+        // Check if notification listener permission is granted
+        val needsOnboarding = !isNotificationServiceEnabled()
 
         setContent {
-            App()
+            App(
+                rulesRepository = try { 
+                    AppModule.getRulesRepository() 
+                } catch (e: Exception) { 
+                    null 
+                },
+                showOnboarding = needsOnboarding,
+                onboardingContent = { onComplete ->
+                    PermissionWizard(onAllGranted = onComplete)
+                }
+            )
         }
     }
 }

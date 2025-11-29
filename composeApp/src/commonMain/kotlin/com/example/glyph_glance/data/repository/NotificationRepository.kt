@@ -1,6 +1,6 @@
 package com.example.glyph_glance.data.repository
 
-import com.example.glyph_glance.data.database.NotificationDao
+import com.example.glyph_glance.database.NotificationDao
 import com.example.glyph_glance.data.models.Notification
 import com.example.glyph_glance.data.models.NotificationPriority
 import kotlinx.coroutines.flow.Flow

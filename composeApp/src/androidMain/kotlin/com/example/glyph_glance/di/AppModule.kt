@@ -5,9 +5,11 @@ import androidx.room.Room
 import com.example.glyph_glance.ai.CactusManager
 import com.example.glyph_glance.database.AppDatabase
 import com.example.glyph_glance.hardware.GlyphManager
+import com.example.glyph_glance.logic.AppRulesRepository
 import com.example.glyph_glance.logic.GlyphIntelligenceEngine
 import com.example.glyph_glance.logic.IntelligenceEngine
 import com.example.glyph_glance.logic.MockIntelligenceEngine
+import com.example.glyph_glance.logic.RulesRepository
 import com.example.glyph_glance.service.BufferEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +21,7 @@ object AppModule {
     private var intelligenceEngine: IntelligenceEngine? = null
     private var glyphManager: GlyphManager? = null
     private var bufferEngine: BufferEngine? = null
+    private var rulesRepository: RulesRepository? = null
     private var useMockEngine = false
 
     fun initialize(context: Context) {
@@ -83,6 +86,15 @@ object AppModule {
                     glyphManager = glyphManager!!
                 )
             }
+            
+            // Initialize RulesRepository for UI
+            if (rulesRepository == null && database != null && cactusManager != null) {
+                rulesRepository = AppRulesRepository(
+                    cactusManager = cactusManager!!,
+                    ruleDao = database!!.ruleDao()
+                )
+                android.util.Log.d("AppModule", "RulesRepository initialized")
+            }
         } catch (e: Exception) {
             android.util.Log.e("AppModule", "Failed to initialize services", e)
             // Don't throw - try to use mock instead
@@ -115,5 +127,20 @@ object AppModule {
     
     fun getBufferEngine(): BufferEngine {
         return bufferEngine ?: throw IllegalStateException("AppModule not initialized")
+    }
+    
+    fun getRulesRepository(): RulesRepository {
+        return rulesRepository ?: throw IllegalStateException("AppModule not initialized or database unavailable")
+    }
+    
+    fun getCactusManager(): CactusManager {
+        return cactusManager ?: throw IllegalStateException("AppModule not initialized")
+    }
+    
+    /**
+     * Check if AppModule has been initialized.
+     */
+    fun isInitialized(): Boolean {
+        return database != null && intelligenceEngine != null
     }
 }

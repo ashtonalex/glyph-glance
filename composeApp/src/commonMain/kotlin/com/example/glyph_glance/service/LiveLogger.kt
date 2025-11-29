@@ -3,6 +3,9 @@ package com.example.glyph_glance.service
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 /**
  * Singleton logger for real-time log streaming to UI.
@@ -18,7 +21,9 @@ object LiveLogger {
      * Add a log entry. Automatically trims old logs if exceeding MAX_LOGS.
      */
     fun addLog(message: String) {
-        val timestamp = System.currentTimeMillis()
+        val now = Clock.System.now()
+        val localTime = now.toLocalDateTime(TimeZone.currentSystemDefault())
+        val timestamp = "%02d:%02d:%02d".format(localTime.hour, localTime.minute, localTime.second)
         val logEntry = "[$timestamp] $message"
         
         val currentLogs = _logs.value

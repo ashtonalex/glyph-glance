@@ -1,4 +1,4 @@
-package com.example.glyph_glance.data.database
+package com.example.glyph_glance.database
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -38,3 +38,4 @@ interface NotificationDao {
     @Query("DELETE FROM notifications")
     suspend fun deleteAllNotifications()
 }
+

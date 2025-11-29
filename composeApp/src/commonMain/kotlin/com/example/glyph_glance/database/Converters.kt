@@ -1,4 +1,4 @@
-package com.example.glyph_glance.data.database
+package com.example.glyph_glance.database
 
 import androidx.room.TypeConverter
 import com.example.glyph_glance.data.models.NotificationPriority
@@ -14,3 +14,4 @@ class Converters {
         return NotificationPriority.valueOf(value)
     }
 }
+

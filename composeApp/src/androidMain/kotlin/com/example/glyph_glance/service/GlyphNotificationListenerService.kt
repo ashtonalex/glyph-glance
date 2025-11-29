@@ -5,35 +5,61 @@ import android.content.pm.PackageManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import androidx.room.Room
-import com.example.glyph_glance.data.database.AppDatabase
 import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.repository.NotificationRepositoryImpl
+import com.example.glyph_glance.di.AppModule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
+/**
+ * Notification Listener Service that intercepts all notifications and routes them
+ * through the BufferEngine for split-text handling, then to IntelligenceEngine for
+ * AI analysis, and finally triggers GlyphManager for hardware feedback.
+ */
 class GlyphNotificationListenerService : NotificationListenerService() {
     
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private lateinit var database: AppDatabase
-    private lateinit var repository: NotificationRepositoryImpl
+    private var bufferEngine: BufferEngine? = null
+    private var notificationRepository: NotificationRepositoryImpl? = null
+    
+    // Packages to ignore (system apps, own app)
+    private val ignoredPackages = setOf(
+        "android",
+        "com.android.systemui",
+        "com.example.glyph_glance"
+    )
     
     override fun onCreate() {
         super.onCreate()
-        database = Room.databaseBuilder(
-            applicationContext,
-            AppDatabase::class.java,
-            "glyph_glance_db"
-        ).build()
         
-        repository = NotificationRepositoryImpl(database.notificationDao())
-        Log.d(TAG, "Notification Listener Service Created")
+        try {
+            // Initialize AppModule if not already initialized
+            AppModule.initialize(applicationContext)
+            
+            // Get dependencies from AppModule
+            bufferEngine = AppModule.getBufferEngine()
+            notificationRepository = NotificationRepositoryImpl(
+                AppModule.getDatabase().notificationDao()
+            )
+            
+            LiveLogger.addLog("NotificationListener: Service started")
+            Log.d(TAG, "Notification Listener Service Created")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize NotificationListenerService", e)
+            LiveLogger.addLog("NotificationListener: ERROR - ${e.message}")
+        }
     }
     
-    override fun onNotificationPosted(sbn: StatusBarNotification) {
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        sbn ?: return
         val notification = sbn.notification ?: return
+        
+        // Filter out ignored packages
+        if (shouldIgnore(sbn)) {
+            return
+        }
         
         // Get app name
         val appName = try {
@@ -49,7 +75,17 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         val message = notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
         
         // Ignore empty notifications
-       if (title.isEmpty() && message.isEmpty()) return
+        if (title.isEmpty() && message.isEmpty()) return
+        
+        // Combine title and message for analysis
+        val combinedText = "$title: $message"
+        
+        // Use package name as sender ID for buffering
+        val senderId = sbn.packageName
+        
+        // Log the interception
+        LiveLogger.addLog("Intercepted: $appName - ${message.take(30)}...")
+        Log.d(TAG, "Intercepted notification: $title from $appName")
         
         // Determine priority based on notification importance
         val importance = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
@@ -57,10 +93,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         } else {
             notification.priority
         }
-        
         val priority = NotificationPriority.fromImportance(importance)
         
-        // Create notification model
+        // Create notification model for database storage
         val notificationModel = com.example.glyph_glance.data.models.Notification(
             title = title,
             message = message,
@@ -70,25 +105,47 @@ class GlyphNotificationListenerService : NotificationListenerService() {
             appName = appName
         )
         
-        // Save to database
         serviceScope.launch {
             try {
-                repository.insertNotification(notificationModel)
-                Log.d(TAG, "Saved notification: $title from $appName (Priority: $priority)")
+                // Save to database for UI display
+                notificationRepository?.insertNotification(notificationModel)
+                
+                // Route through BufferEngine for split-text handling and AI analysis
+                // BufferEngine will call IntelligenceEngine and GlyphManager
+                bufferEngine?.handleIncoming(senderId, combinedText)
+                
             } catch (e: Exception) {
-                Log.e(TAG, "Error saving notification", e)
+                Log.e(TAG, "Error processing notification", e)
+                LiveLogger.addLog("ERROR: ${e.message}")
             }
         }
     }
     
-    override fun onNotificationRemoved(sbn: StatusBarNotification) {
-        // Optional: Handle notification removal
-        Log.d(TAG, "Notification removed: ${sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)}")
+    /**
+     * Check if this notification should be ignored.
+     */
+    private fun shouldIgnore(sbn: StatusBarNotification): Boolean {
+        // Ignore ongoing notifications (music players, downloads, etc.)
+        if (sbn.isOngoing) return true
+        
+        // Ignore system packages
+        if (ignoredPackages.contains(sbn.packageName)) return true
+        
+        // Ignore our own app's notifications
+        if (sbn.packageName == packageName) return true
+        
+        return false
+    }
+    
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        sbn ?: return
+        Log.d(TAG, "Notification removed: ${sbn.notification?.extras?.getCharSequence(Notification.EXTRA_TITLE)}")
     }
     
     override fun onDestroy() {
         super.onDestroy()
-        database.close()
+        LiveLogger.addLog("NotificationListener: Service stopped")
+        Log.d(TAG, "Notification Listener Service Destroyed")
     }
     
     companion object {
