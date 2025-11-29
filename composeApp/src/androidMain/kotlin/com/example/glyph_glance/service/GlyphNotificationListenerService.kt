@@ -8,6 +8,7 @@ import android.util.Log
 import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.repository.NotificationRepositoryImpl
 import com.example.glyph_glance.di.AppModule
+import com.example.glyph_glance.di.AppModule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
