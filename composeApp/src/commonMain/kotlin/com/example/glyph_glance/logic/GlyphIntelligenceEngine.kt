@@ -156,6 +156,49 @@ class GlyphIntelligenceEngine(
         val activeRules = ruleDao.getAllRules()
         val triggeredRule = matchRules(text, senderId, activeRules)
 
+        // 4. Determine Output based on urgency score and sentiment
+        // Priority: Triggered rules > High urgency > Sentiment > Lower urgency
+        val pattern = when {
+            triggeredRule != null -> {
+                // Triggered rules always get high priority
+                GlyphPattern.HIGH_STROBE
+            }
+            aiResult.urgencyScore >= 4 -> {
+                // High urgency takes precedence over sentiment
+                GlyphPattern.HIGH_STROBE
+            }
+            aiResult.sentiment == "NEGATIVE" -> {
+                // Negative sentiment triggers amber breathe for non-urgent messages
+                GlyphPattern.AMBER_BREATHE
+            }
+            aiResult.sentiment == "POSITIVE" -> {
+                // Positive sentiment triggers gentle glow for non-urgent messages
+                GlyphPattern.POSITIVE_GLOW
+            }
+            else -> {
+                // Fall back to urgency-based pattern for neutral sentiment
+                urgencyToPattern(aiResult.urgencyScore)
+            }
+        }
+        
+        return DecisionResult(
+            shouldLightUp = pattern != GlyphPattern.NONE,
+            pattern = pattern
+        )
+    }
+    
+    /**
+     * Maps AI urgency scores to proportionate Glyph patterns.
+     * - Score >= 4: HIGH_STROBE (aggressive all-channel strobe)
+     * - Score >= 2: MEDIUM_PULSE (moderate dual-channel pulse)
+     * - Score >= 1: LOW_SUBTLE (gentle single-channel glow)
+     * - Score < 1: NONE (no notification)
+     */
+    private fun urgencyToPattern(score: Int): GlyphPattern = when {
+        score >= 4 -> GlyphPattern.HIGH_STROBE
+        score >= 2 -> GlyphPattern.MEDIUM_PULSE
+        score >= 1 -> GlyphPattern.LOW_SUBTLE
+        else -> GlyphPattern.NONE
         // 6. Determine Glyph Pattern based on urgency and rules
         val shouldLightUp = triggeredRule != null || finalUrgencyScore >= 4
         val pattern = when {

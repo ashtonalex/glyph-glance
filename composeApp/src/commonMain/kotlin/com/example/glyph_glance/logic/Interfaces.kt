@@ -42,8 +42,14 @@ data class DecisionResult(
     val isBuffered: Boolean = false // True if this result is from a buffered/superseded notification
 )
 
+/**
+ * Glyph light patterns mapped to notification priority levels and sentiment.
+ */
 enum class GlyphPattern {
-    URGENT,
-    AMBER_BREATHE,
-    NONE
+    HIGH_STROBE,      // Aggressive all-channel strobe (urgent/high priority)
+    MEDIUM_PULSE,     // Moderate pulsing effect (medium priority)
+    LOW_SUBTLE,       // Gentle single-channel glow (low priority)
+    AMBER_BREATHE,    // Breathing animation pattern (negative sentiment)
+    POSITIVE_GLOW,    // Gentle warm glow (positive sentiment)
+    NONE              // Off
 }

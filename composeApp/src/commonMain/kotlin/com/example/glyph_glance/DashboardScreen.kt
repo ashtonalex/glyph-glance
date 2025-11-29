@@ -45,6 +45,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+
+import com.example.glyph_glance.logic.GlyphPattern
+import com.example.glyph_glance.service.LiveLogger
+
+// ... (other imports remain same)
 import com.example.glyph_glance.data.models.AppRule
 import com.example.glyph_glance.data.models.KeywordRule
 import com.example.glyph_glance.data.models.NotificationPriority
@@ -273,7 +278,7 @@ fun DashboardScreen() {
             .padding(16.dp),
         contentPadding = PaddingValues(bottom = 80.dp) // Space for bottom nav
     ) {
-        // Header
+        // ... existing Header ...
         item {
             HeaderSection(
                 onDeveloperModeToggle = { enabled ->
@@ -286,7 +291,21 @@ fun DashboardScreen() {
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // Summary Cards
+        // DEBUG SECTION
+        item {
+            androidx.compose.material3.Button(
+                onClick = { 
+                    // This will be intercepted by Platform specific code or handled via shared logic
+                    // But for now, we just log it. The button in MainActivity handles the hardware trigger directly.
+                    LiveLogger.addLog("Dashboard Button Clicked (No-op here, use MainActivity button)")
+                },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Text("This is the Common UI - Use the Button Below Header in Main App")
+            }
+        }
+
+        // ... existing Summary ...        // Summary Cards
         item {
             SummarySection(notifications = allNotifications)
             Spacer(modifier = Modifier.height(24.dp))

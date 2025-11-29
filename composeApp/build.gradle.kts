@@ -18,7 +18,7 @@ kotlin {
         }
     }
     
-    jvmToolchain(21)
+    jvmToolchain(25)
     
     listOf(
         iosArm64(),
@@ -37,6 +37,7 @@ kotlin {
             implementation(libs.androidx.datastore.preferences)
         }
         commonMain.dependencies {
+            implementation("com.cactuscompute:cactus:1.2.0-beta")
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)

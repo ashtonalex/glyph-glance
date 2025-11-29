@@ -3,7 +3,13 @@ package com.example.glyph_glance.di
 import android.content.Context
 import androidx.room.Room
 import com.example.glyph_glance.database.AppDatabase
+import com.example.glyph_glance.hardware.GlyphManager
+import com.example.glyph_glance.logic.AppRulesRepository
 import com.example.glyph_glance.logic.GlyphIntelligenceEngine
+import com.example.glyph_glance.logic.IntelligenceEngine
+import com.example.glyph_glance.logic.RulesRepository
+import com.example.glyph_glance.service.BufferEngine
+import com.example.glyph_glance.service.LiveLogger
 import com.example.glyph_glance.logic.SemanticMatcher
 import com.example.glyph_glance.logic.SentimentAnalysisService
 import kotlinx.coroutines.CoroutineScope
@@ -12,6 +18,45 @@ import kotlinx.coroutines.launch
 
 object AppModule {
     private var database: AppDatabase? = null
+    private var cactusManager: CactusManager? = null
+    private var intelligenceEngine: IntelligenceEngine? = null
+    private var glyphManager: GlyphManager? = null
+    private var bufferEngine: BufferEngine? = null
+    private var rulesRepository: RulesRepository? = null
+
+    fun initialize(context: Context) {
+        try {
+            if (database == null) {
+                database = Room.databaseBuilder(
+                    context.applicationContext,
+                    AppDatabase::class.java,
+                    "glyph-db"
+                ).build()
+                android.util.Log.d("AppModule", "Database initialized successfully")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AppModule", "Failed to initialize database", e)
+            throw RuntimeException("Failed to initialize database: ${e.message}", e)
+        }
+
+        if (cactusManager == null) {
+            LiveLogger.addLog("AppModule: Creating CactusManager instance")
+            cactusManager = CactusManager()
+            // Initialize model download in background
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    LiveLogger.addLog("AppModule: Starting CactusManager initialization in background")
+                    cactusManager?.initialize()
+                    
+                    // Log status after initialization
+                    val status = cactusManager?.getStatus()
+                    if (status != null) {
+                        LiveLogger.addLog("AppModule: Cactus status - Initialized=${status.isInitialized}, Downloaded=${status.isModelDownloaded}, Ready=${status.isReady}")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("AppModule", "Failed to initialize CactusManager", e)
+                    LiveLogger.addLog("AppModule: ERROR - Failed to initialize CactusManager: ${e.message}")
+                }
     private var sentimentAnalysisService: SentimentAnalysisService? = null
     private var semanticMatcher: SemanticMatcher? = null
     private var intelligenceEngine: GlyphIntelligenceEngine? = null
@@ -44,6 +89,42 @@ object AppModule {
             loadSemanticKeywords(context.applicationContext)
         }
 
+        try {
+            if (intelligenceEngine == null) {
+                if (database != null && cactusManager != null) {
+                    intelligenceEngine = GlyphIntelligenceEngine(
+                        cactusManager = cactusManager!!,
+                        ruleDao = database!!.ruleDao(),
+                        contactDao = database!!.contactDao()
+                    )
+                    android.util.Log.d("AppModule", "Using GlyphIntelligenceEngine")
+                } else {
+                    throw RuntimeException("Database or CactusManager not available")
+                }
+            }
+
+            if (glyphManager == null) {
+                glyphManager = GlyphManager(context.applicationContext)
+            }
+
+            if (bufferEngine == null) {
+                bufferEngine = BufferEngine(
+                    intelligenceEngine = intelligenceEngine!!,
+                    glyphManager = glyphManager!!
+                )
+            }
+            
+            // Initialize RulesRepository for UI
+            if (rulesRepository == null && database != null && cactusManager != null) {
+                rulesRepository = AppRulesRepository(
+                    cactusManager = cactusManager!!,
+                    ruleDao = database!!.ruleDao()
+                )
+                android.util.Log.d("AppModule", "RulesRepository initialized")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AppModule", "Failed to initialize services", e)
+            throw RuntimeException("Failed to initialize services: ${e.message}", e)
         if (intelligenceEngine == null) {
             intelligenceEngine = GlyphIntelligenceEngine(
                 sentimentAnalysisService = sentimentAnalysisService!!,
@@ -76,7 +157,7 @@ object AppModule {
         }
     }
 
-    fun getIntelligenceEngine(): GlyphIntelligenceEngine {
+    fun getIntelligenceEngine(): IntelligenceEngine {
         return intelligenceEngine ?: throw IllegalStateException("AppModule not initialized")
     }
     
@@ -88,6 +169,27 @@ object AppModule {
         return database ?: throw IllegalStateException("AppModule not initialized")
     }
     
+    fun getGlyphManager(): GlyphManager {
+        return glyphManager ?: throw IllegalStateException("AppModule not initialized")
+    }
+    
+    fun getBufferEngine(): BufferEngine {
+        return bufferEngine ?: throw IllegalStateException("AppModule not initialized")
+    }
+    
+    fun getRulesRepository(): RulesRepository {
+        return rulesRepository ?: throw IllegalStateException("AppModule not initialized or database unavailable")
+    }
+    
+    fun getCactusManager(): CactusManager {
+        return cactusManager ?: throw IllegalStateException("AppModule not initialized")
+    }
+    
+    /**
+     * Check if AppModule has been initialized.
+     */
+    fun isInitialized(): Boolean {
+        return database != null && intelligenceEngine != null
     fun getSemanticMatcher(): SemanticMatcher {
         return semanticMatcher ?: throw IllegalStateException("AppModule not initialized")
     }
