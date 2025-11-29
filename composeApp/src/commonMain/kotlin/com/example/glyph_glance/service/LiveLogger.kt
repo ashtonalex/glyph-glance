@@ -26,6 +26,9 @@ object LiveLogger {
         val timestamp = "%02d:%02d:%02d".format(localTime.hour, localTime.minute, localTime.second)
         val logEntry = "[$timestamp] $message"
         
+        // Print to system out for debugging
+        println("LiveLogger: $message")
+        
         val currentLogs = _logs.value
         val newLogs = (currentLogs + logEntry).takeLast(MAX_LOGS)
         _logs.value = newLogs
