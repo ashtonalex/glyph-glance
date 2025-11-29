@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 data class AnalysisResult(
-    val urgencyScore: Int, // 1 (Low) to 5 (Critical)
+    val urgencyScore: Int, // 1-2 Low, 3-4 Medium, 5-6 High
     val sentiment: String, // "POSITIVE", "NEGATIVE", "NEUTRAL"
     val triggeredRuleId: Int? = null, // Null if no specific rule matched
     val rawAiResponse: String? = null // Raw response from AI for debugging
@@ -81,19 +81,21 @@ class SentimentAnalysisService {
         val lm = cactusLM ?: return getDefaultResult()
         
         return try {
+            val appContext = inferAppContext(senderId)
             // Simplified prompt for faster responses - just need a number
             // Explicitly state this is a standalone request with no previous context
-            val systemPrompt = "You are an urgency evaluator. Each request is independent with no conversation history. Output ONLY a number 1-5. No explanation."
+            val systemPrompt = "You are an urgency evaluator. Each request is independent with no conversation history. Output ONLY a number 1-6. No explanation."
             
             val userPrompt = """
                 This is a standalone request. Analyze ONLY this notification and its implied context:
                 
-                Rate urgency 1-5 based on how quickly the message should realistically be addressed:
-                1 = Not urgent  – casual, informational, or can be safely ignored for a long time
-                2 = Slightly urgent – can wait, but should be handled at some point
-                3 = Moderately urgent – should be handled soon, but not immediately
-                4 = Urgent – needs attention as soon as reasonably possible
-                5 = Extremely urgent / critical – needs attention right away (\"drop everything\")
+                Rate urgency 1-6 based on how quickly the message should realistically be addressed:
+                1 = Very low priority – casual, informational, or can be safely ignored for a long time
+                2 = Low priority – can wait comfortably, no real pressure
+                3 = Slightly urgent – should be handled at some point soon
+                4 = Moderately urgent – should be handled soon, but not immediately
+                5 = Urgent – needs attention as soon as reasonably possible
+                6 = Extremely urgent / critical – needs attention right away (\"drop everything\")
                 
                 When deciding the score, use BOTH the sender/app name and the message content:
                 - WHO is involved: e.g. a boss, important client, or doctor is usually more important than a game or casual friend
@@ -105,13 +107,15 @@ class SentimentAnalysisService {
                   • Clear emergency or crisis language → very high urgency
                 
                 Focus on how quickly a reasonable person should respond overall, not just specific keywords.
+                
+                Inferred app context (best guess based on name, may be wrong): $appContext
                 You will receive:
                 - Sender/App name: \"$senderId\"
                 - Message: \"$content\"
                 
                 Analyze them together when deciding the urgency score.
                 
-                Output ONLY the number (1, 2, 3, 4, or 5):
+                Output ONLY the number (1, 2, 3, 4, 5, or 6):
             """.trimIndent()
             
             println("SentimentAnalysisService: Sending prompt to Qwen3 for message: '$content'")
@@ -126,7 +130,7 @@ class SentimentAnalysisService {
             val result = lm.generateCompletion(
                 messages = messages,
                 params = CactusCompletionParams(
-                    maxTokens = 400, // Allow for full response including any explanation
+                    maxTokens = 500, // Allow for full response including any explanation
                     temperature = 0.0 // Zero temperature for fastest, most deterministic output
                 )
             )
@@ -148,19 +152,78 @@ class SentimentAnalysisService {
     }
     
     /**
+     * Heuristic function to infer basic app context from the sender/app name.
+     * This is offline-only and uses simple string matching, no network calls.
+     */
+    private fun inferAppContext(senderId: String): String {
+        val name = senderId.lowercase()
+        
+        // Work / productivity / communication
+        if (listOf("gmail", "mail", "outlook", "teams", "slack", "zoom", "meet", "calendar", "todo", "task", "work", "office")
+                .any { name.contains(it) }) {
+            return "Likely a WORK or PRODUCTIVITY app (email, meetings, tasks, or calendar). Messages here are often more important."
+        }
+        
+        // Messaging / phone / SMS
+        if (listOf("message", "messages", "sms", "whatsapp", "telegram", "signal", "imessage", "phone", "dialer", "call")
+                .any { name.contains(it) }) {
+            return "Likely a PERSONAL MESSAGING or PHONE app. Messages are from real people and can often be important or time-sensitive."
+        }
+        
+        // Finance / banking
+        if (listOf("bank", "finance", "pay", "paypal", "revolut", "wise", "cashapp", "trading", "broker")
+                .any { name.contains(it) }) {
+            return "Likely a FINANCE or BANKING app. Notifications can be important but not always immediately urgent."
+        }
+        
+        // Health / medical
+        if (listOf("health", "med", "doctor", "clinic", "hospital", "fitness", "workout")
+                .any { name.contains(it) }) {
+            return "Likely a HEALTH or MEDICAL related app. Some notifications could be sensitive or important."
+        }
+        
+        // System / OS / utilities
+        if (listOf("android", "system", "settings", "update", "security")
+                .any { name.contains(it) }) {
+            return "Likely a SYSTEM or OS notification. Often informative; urgency depends on the message."
+        }
+        
+        // Games
+        if (listOf("game", "games", "play", "clash", "royale", "pubg", "fortnite", "league", "valorant")
+                .any { name.contains(it) }) {
+            return "Likely a GAME or ENTERTAINMENT app. Messages are usually low urgency unless clearly stating something time-critical."
+        }
+        
+        // Social media
+        if (listOf("instagram", "facebook", "messenger", "tiktok", "snapchat", "twitter", "reddit", "discord")
+                .any { name.contains(it) }) {
+            return "Likely a SOCIAL MEDIA or COMMUNITY app. Most notifications are low to medium urgency unless clearly urgent."
+        }
+        
+        // Shopping / delivery
+        if (listOf("amazon", "shop", "shopping", "delivery", "uber", "doordash", "ubereats", "instacart")
+                .any { name.contains(it) }) {
+            return "Likely a SHOPPING or DELIVERY app. Order/delivery status can be somewhat time-sensitive."
+        }
+        
+        // Default fallback
+        return "Unknown or generic app. Treat urgency based mainly on the message content and whether it sounds like a real person vs a system."
+    }
+    
+    /**
      * Parse urgency score from Qwen3 response
-     * The response should be just a number (1-5), but may include explanation text
+     * The response should be just a number (1-6), but may include explanation text
      */
     private fun parseUrgencyScore(response: String, rawResponse: String): AnalysisResult {
         return try {
             val trimmedResponse = response.trim()
             println("SentimentAnalysisService: Parsing urgency score from response: '$trimmedResponse'")
             
-            // Strategy 1: Check if response starts with a number 1-5 (most common case)
-            val startsWithNumber = """^([1-5])""".toRegex()
+            // Strategy 1: Check if response starts with a number 1-6 (most common case)
+            val startsWithNumber = """^([1-6])""".toRegex()
             val startMatch = startsWithNumber.find(trimmedResponse)
             if (startMatch != null) {
-                val score = startMatch.groupValues[1].toIntOrNull()?.coerceIn(1, 5)
+                val score = startMatch.groupValues[1].toIntOrNull()?.coerceIn(1, 6)
                 if (score != null) {
                     return AnalysisResult(
                         urgencyScore = score,
@@ -170,13 +233,13 @@ class SentimentAnalysisService {
                 }
             }
             
-            // Strategy 2: Find all numbers 1-5 in the response and take the last one (most likely the final answer)
-            val numberRegex = """([1-5])""".toRegex()
+            // Strategy 2: Find all numbers 1-6 in the response and take the last one (most likely the final answer)
+            val numberRegex = """([1-6])""".toRegex()
             val allMatches = numberRegex.findAll(trimmedResponse).toList()
             if (allMatches.isNotEmpty()) {
                 // Take the last match (most likely the final answer after explanation)
                 val lastMatch = allMatches.last()
-                val score = lastMatch.groupValues[1].toIntOrNull()?.coerceIn(1, 5)
+                val score = lastMatch.groupValues[1].toIntOrNull()?.coerceIn(1, 6)
                 if (score != null) {
                     return AnalysisResult(
                         urgencyScore = score,
@@ -192,7 +255,7 @@ class SentimentAnalysisService {
             if (fallbackMatches.isNotEmpty()) {
                 // Take the last digit found
                 val lastDigit = fallbackMatches.last()
-                val score = lastDigit.groupValues[1].toIntOrNull()?.coerceIn(1, 5)
+                val score = lastDigit.groupValues[1].toIntOrNull()?.coerceIn(1, 6)
                 if (score != null) {
                     return AnalysisResult(
                         urgencyScore = score,

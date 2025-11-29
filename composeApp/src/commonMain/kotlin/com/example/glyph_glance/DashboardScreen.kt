@@ -1543,7 +1543,7 @@ fun SentimentTestSection(
                                     fontWeight = FontWeight.Bold
                                 )
                                 
-                                // Urgency Score (AI Analysis)
+                                // Urgency Score (AI Analysis) - 1 to 6
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1558,16 +1558,17 @@ fun SentimentTestSection(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        // Score display with color
+                                        // Score display with color (1-2 low, 3-4 medium, 5-6 high)
                                         val aiUrgencyColor = when (testResult.urgencyScore) {
-                                            5 -> themeColors.highPriority
-                                            4 -> themeColors.highPriority.copy(alpha = 0.8f)
-                                            3 -> themeColors.mediumPriority
-                                            2 -> themeColors.lowPriority.copy(alpha = 0.8f)
+                                            6 -> themeColors.highPriority
+                                            5 -> themeColors.highPriority.copy(alpha = 0.9f)
+                                            4 -> themeColors.mediumPriority
+                                            3 -> themeColors.mediumPriority.copy(alpha = 0.8f)
+                                            2 -> themeColors.lowPriority.copy(alpha = 0.9f)
                                             else -> themeColors.lowPriority
                                         }
                                         Text(
-                                            text = "${testResult.urgencyScore}/5",
+                                            text = "${testResult.urgencyScore}/6",
                                             style = MaterialTheme.typography.headlineSmall,
                                             color = aiUrgencyColor,
                                             fontWeight = FontWeight.Bold
@@ -1576,7 +1577,7 @@ fun SentimentTestSection(
                                         Row(
                                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
-                                            repeat(5) { index ->
+                                            repeat(6) { index ->
                                                 Box(
                                                     modifier = Modifier
                                                         .size(8.dp)
@@ -1642,7 +1643,7 @@ fun SentimentTestSection(
                                     }
                                 }
                                 
-                                // Final Urgency Score (after rules)
+                                // Final Urgency Score (after rules) - 1 to 6
                                 if (calculatedPriority != null && testResult != null) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -1662,14 +1663,15 @@ fun SentimentTestSection(
                                             val displayFinalUrgencyScore = finalUrgencyScore ?: testResult.urgencyScore
                                             
                                             val finalUrgencyColor = when (displayFinalUrgencyScore) {
-                                                5 -> themeColors.highPriority
-                                                4 -> themeColors.highPriority.copy(alpha = 0.8f)
-                                                3 -> themeColors.mediumPriority
-                                                2 -> themeColors.lowPriority.copy(alpha = 0.8f)
+                                                6 -> themeColors.highPriority
+                                                5 -> themeColors.highPriority.copy(alpha = 0.9f)
+                                                4 -> themeColors.mediumPriority
+                                                3 -> themeColors.mediumPriority.copy(alpha = 0.8f)
+                                                2 -> themeColors.lowPriority.copy(alpha = 0.9f)
                                                 else -> themeColors.lowPriority
                                             }
                                             Text(
-                                                text = "$displayFinalUrgencyScore/5",
+                                                text = "$displayFinalUrgencyScore/6",
                                                 style = MaterialTheme.typography.headlineSmall,
                                                 color = finalUrgencyColor,
                                                 fontWeight = FontWeight.Bold
