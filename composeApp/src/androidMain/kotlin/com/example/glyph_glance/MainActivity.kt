@@ -17,11 +17,8 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.BLACK
         
-        // Initialize Cactus SDK
-        com.cactus.CactusContextInitializer.initialize(this)
-        
-        // Initialize DI
-        com.example.glyph_glance.di.AppModule.initialize(this)
+        // Note: Cactus SDK and AppModule are now initialized in GlyphGlanceApplication.onCreate()
+        // No need to initialize here since Application.onCreate() runs before Activity.onCreate()
 
         setContent {
             App()

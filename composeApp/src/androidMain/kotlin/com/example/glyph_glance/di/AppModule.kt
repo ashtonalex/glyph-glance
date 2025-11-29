@@ -13,8 +13,11 @@ object AppModule {
     private var database: AppDatabase? = null
     private var sentimentAnalysisService: SentimentAnalysisService? = null
     private var intelligenceEngine: GlyphIntelligenceEngine? = null
+    private var applicationContext: Context? = null
 
     fun initialize(context: Context) {
+        applicationContext = context.applicationContext
+        
         if (database == null) {
             database = Room.databaseBuilder(
                 context.applicationContext,
@@ -25,9 +28,11 @@ object AppModule {
 
         if (sentimentAnalysisService == null) {
             sentimentAnalysisService = SentimentAnalysisService()
-            // Initialize model download in background
+            // Note: Model download is now handled separately via downloadModelIfNeeded()
+            // which is called from GlyphGlanceApplication.onCreate()
+            // Here we just load the model into memory (assumes download was done at app start)
             CoroutineScope(Dispatchers.IO).launch {
-                sentimentAnalysisService?.initialize()
+                sentimentAnalysisService?.loadModelIntoMemory()
             }
         }
 
@@ -50,5 +55,9 @@ object AppModule {
     
     fun getDatabase(): AppDatabase {
         return database ?: throw IllegalStateException("AppModule not initialized")
+    }
+    
+    fun getApplicationContext(): Context {
+        return applicationContext ?: throw IllegalStateException("AppModule not initialized")
     }
 }

@@ -9,7 +9,7 @@ import com.example.glyph_glance.data.models.Notification
 
 @Database(
     entities = [Notification::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -23,6 +23,13 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE notifications ADD COLUMN sentiment TEXT")
                 // Add urgencyScore column (nullable INTEGER)
                 database.execSQL("ALTER TABLE notifications ADD COLUMN urgencyScore INTEGER")
+            }
+        }
+        
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // Add rawAiResponse column (nullable TEXT) for storing AI thought process
+                database.execSQL("ALTER TABLE notifications ADD COLUMN rawAiResponse TEXT")
             }
         }
     }

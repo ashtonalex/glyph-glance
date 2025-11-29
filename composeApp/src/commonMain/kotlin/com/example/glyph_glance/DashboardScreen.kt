@@ -75,7 +75,8 @@ data class ActivityNotification(
     val priority: NotificationPriority,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
     val sentiment: String? = null,
-    val urgencyScore: Int? = null
+    val urgencyScore: Int? = null,
+    val rawAiResponse: String? = null // Raw AI thought process for analysis details
 )
 
 @Composable
@@ -119,6 +120,15 @@ fun DashboardScreen() {
     var finalUrgencyScore by remember { mutableStateOf<Int?>(null) }
     var rulesMatched by remember { mutableStateOf(false) }
     
+    // Notification details dialog state
+    var selectedNotification by remember { mutableStateOf<ActivityNotification?>(null) }
+    var showNotificationDetails by remember { mutableStateOf(false) }
+    
+    // Track notification processing state for UI refresh
+    // Uses the same state check logic as the NotificationStatusCard
+    val isProcessing by com.example.glyph_glance.logging.LiveLogger.isProcessingNotification.collectAsState()
+    var wasProcessing by remember { mutableStateOf(false) }
+    
     // Helper function to format time ago
     fun formatTimeAgo(minutesAgo: Int): String {
         return when {
@@ -159,10 +169,40 @@ fun DashboardScreen() {
                     priority = dbNotif.priority,
                     icon = getIconForApp(dbNotif.appName),
                     sentiment = dbNotif.sentiment,
-                    urgencyScore = dbNotif.urgencyScore
+                    urgencyScore = dbNotif.urgencyScore,
+                    rawAiResponse = dbNotif.rawAiResponse
                 )
             })
         }
+    }
+    
+    // Refresh dashboard when notification analysis completes (isProcessing: true -> false)
+    // Uses the same state check logic as the NotificationStatusCard
+    LaunchedEffect(isProcessing) {
+        if (wasProcessing && !isProcessing) {
+            // Analysis just completed - trigger UI refresh by re-fetching notifications
+            notificationRepository?.getAllNotifications()?.collect { notifications ->
+                dbNotificationsList = notifications
+                val currentTime = System.currentTimeMillis()
+                allNotifications.clear()
+                allNotifications.addAll(notifications.map { dbNotif ->
+                    val minutesAgo = ((currentTime - dbNotif.timestamp) / (1000 * 60)).toInt()
+                    ActivityNotification(
+                        id = dbNotif.id,
+                        title = dbNotif.title,
+                        message = dbNotif.message,
+                        time = formatTimeAgo(minutesAgo),
+                        minutesAgo = minutesAgo,
+                        priority = dbNotif.priority,
+                        icon = getIconForApp(dbNotif.appName),
+                        sentiment = dbNotif.sentiment,
+                        urgencyScore = dbNotif.urgencyScore,
+                        rawAiResponse = dbNotif.rawAiResponse
+                    )
+                })
+            }
+        }
+        wasProcessing = isProcessing
     }
     
     // Load keywords, apps, and developer mode on first composition
@@ -223,6 +263,12 @@ fun DashboardScreen() {
         // Summary Cards
         item {
             SummarySection(notifications = allNotifications)
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+        
+        // Notification Processing Status Card
+        item {
+            NotificationStatusCard()
             Spacer(modifier = Modifier.height(24.dp))
         }
 
@@ -307,7 +353,8 @@ fun DashboardScreen() {
                                     priority = finalPriorityFromUrgency,
                                     icon = getIconForApp(testSender),
                                     sentiment = analysisResult?.sentiment,
-                                    urgencyScore = finalUrgencyScoreValue
+                                    urgencyScore = finalUrgencyScoreValue,
+                                    rawAiResponse = analysisResult?.rawAiResponse
                                 )
                                 
                                 // Add to the beginning of the list
@@ -553,7 +600,11 @@ fun DashboardScreen() {
                                         icon = notification.icon,
                                         sentiment = notification.sentiment,
                                         urgencyScore = notification.urgencyScore,
-                                        onDelete = deleteHandler
+                                        onDelete = deleteHandler,
+                                        onClick = {
+                                            selectedNotification = notification
+                                            showNotificationDetails = true
+                                        }
                                     )
                                 }
                                 if (index < filteredNotifications.size - 1) {
@@ -636,6 +687,22 @@ fun DashboardScreen() {
                     prefsManager.saveAppRules(appRules)
                 }
                 showAddAppDialog = false
+            }
+        )
+    }
+    
+    // Notification Details Dialog
+    if (showNotificationDetails && selectedNotification != null) {
+        NotificationDetailsDialog(
+            title = selectedNotification!!.title,
+            message = selectedNotification!!.message,
+            priority = selectedNotification!!.priority,
+            sentiment = selectedNotification!!.sentiment,
+            urgencyScore = selectedNotification!!.urgencyScore,
+            rawAiResponse = selectedNotification!!.rawAiResponse,
+            onDismiss = {
+                showNotificationDetails = false
+                selectedNotification = null
             }
         )
     }
@@ -896,6 +963,45 @@ fun PriorityCountItem(
             color = TextWhite,
             fontWeight = FontWeight.Bold
         )
+    }
+}
+
+@Composable
+fun NotificationStatusCard() {
+    val themeColors = LocalThemeColors.current
+    val isProcessing by com.example.glyph_glance.logging.LiveLogger.isProcessingNotification.collectAsState()
+    
+    GlyphCard(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isProcessing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = themeColors.mediumPriority,
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Thinking...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = themeColors.mediumPriority,
+                    fontWeight = FontWeight.Medium
+                )
+            } else {
+                Text(
+                    text = "No pending notifications.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextGrey
+                )
+            }
+        }
     }
 }
 

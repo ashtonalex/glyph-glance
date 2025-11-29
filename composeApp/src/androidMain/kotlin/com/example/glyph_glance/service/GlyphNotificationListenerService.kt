@@ -14,6 +14,7 @@ import com.example.glyph_glance.di.AppModule
 import com.example.glyph_glance.logic.GlyphIntelligenceEngine
 import com.example.glyph_glance.logic.GlyphPattern
 import com.example.glyph_glance.logic.calculatePriority
+import com.example.glyph_glance.logging.LiveLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,11 +41,15 @@ class GlyphNotificationListenerService : NotificationListenerService() {
             AppDatabase::class.java,
             "glyph_glance_db"
         )
-        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
         .build()
         
         repository = NotificationRepositoryImpl(notificationDatabase.notificationDao())
         preferencesManager = AndroidPreferencesManager(applicationContext)
+        
+        // Log service start
+        LiveLogger.setServiceRunning(true)
+        LiveLogger.setNotificationAccessEnabled(true)
         
         Log.d(TAG, "Notification Listener Service Created with GlyphIntelligenceEngine")
     }
@@ -68,6 +73,13 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         // Ignore empty notifications
         if (title.isEmpty() && message.isEmpty()) return
         
+        // Log notification received
+        LiveLogger.logNotificationReceived(
+            appName = appName,
+            title = title,
+            preview = message
+        )
+        
         // Determine base priority based on notification importance
         val importance = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             sbn.notification.priority
@@ -76,6 +88,13 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         }
         
         val basePriority = NotificationPriority.fromImportance(importance)
+        
+        // Log buffer queue activity
+        LiveLogger.logBufferQueue(
+            senderId = appName,
+            action = "Added to processing queue",
+            queueSize = 1
+        )
         
         // Process notification through GlyphIntelligenceEngine
         serviceScope.launch {
@@ -86,6 +105,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 } else {
                     title.ifEmpty { message }
                 }
+                
+                // Set processing state for UI feedback
+                LiveLogger.setProcessingNotification(true)
                 
                 // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
                 val decision = intelligenceEngine.processNotification(fullText, appName)
@@ -115,7 +137,8 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     appPackage = sbn.packageName,
                     appName = appName,
                     sentiment = decision.sentiment,
-                    urgencyScore = finalUrgencyScore
+                    urgencyScore = finalUrgencyScore,
+                    rawAiResponse = decision.rawAiResponse
                 )
                 
                 // Save to database
@@ -129,9 +152,17 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 // Handle glyph pattern if needed
                 if (decision.shouldLightUp) {
                     handleGlyphPattern(decision.pattern)
+                } else {
+                    LiveLogger.logGlyphInteraction(decision.pattern.name, false)
                 }
+                
+                // Processing complete
+                LiveLogger.setProcessingNotification(false)
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing notification", e)
+                LiveLogger.logError("NotificationListener", e.message ?: "Error processing notification")
+                LiveLogger.setProcessingNotification(false)
+                
                 // Save with fallback priority if processing fails
                 try {
                     val keywordRules = preferencesManager.getKeywordRules()
@@ -162,12 +193,16 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     repository.insertNotification(notificationModel)
                 } catch (saveError: Exception) {
                     Log.e(TAG, "Error saving notification", saveError)
+                    LiveLogger.logError("NotificationListener", saveError.message ?: "Error saving notification")
                 }
             }
         }
     }
     
     private fun handleGlyphPattern(pattern: GlyphPattern) {
+        // Log glyph interaction
+        LiveLogger.logGlyphInteraction(pattern.name, pattern != GlyphPattern.NONE)
+        
         // TODO: Implement actual glyph light control based on pattern
         when (pattern) {
             GlyphPattern.URGENT -> {
@@ -192,6 +227,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     override fun onDestroy() {
         super.onDestroy()
         notificationDatabase.close()
+        
+        // Log service stop
+        LiveLogger.setServiceRunning(false)
     }
     
     companion object {
