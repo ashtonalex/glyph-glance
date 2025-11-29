@@ -141,7 +141,7 @@ fun NotificationItem(
                     }
                     urgencyScore?.let {
                         Text(
-                            text = "Urgency: $it/5",
+                            text = "Urgency: $it/6",
                             style = MaterialTheme.typography.labelSmall,
                             color = TextGrey
                         )

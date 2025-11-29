@@ -6,16 +6,16 @@ enum class NotificationPriority {
     LOW;
     
     /**
-     * Converts priority to urgency score (1-5)
-     * HIGH -> 5 (Critical)
-     * MEDIUM -> 3 (Medium)
-     * LOW -> 1 (Low)
+     * Converts priority to urgency score (1-6)
+     * HIGH -> 6 (High)
+     * MEDIUM -> 4 (Medium)
+     * LOW -> 2 (Low)
      */
     fun toUrgencyScore(): Int {
         return when (this) {
-            HIGH -> 5
-            MEDIUM -> 3
-            LOW -> 1
+            HIGH -> 6
+            MEDIUM -> 4
+            LOW -> 2
         }
     }
     
@@ -29,16 +29,17 @@ enum class NotificationPriority {
         }
         
         /**
-         * Converts urgency score (1-5) to priority level
-         * 5, 4 -> HIGH
-         * 3, 2 -> MEDIUM
-         * 1 -> LOW
+         * Converts urgency score (1-6) to priority level
+         * 5, 6 -> HIGH
+         * 3, 4 -> MEDIUM
+         * 1, 2 -> LOW
          */
         fun fromUrgencyScore(urgencyScore: Int): NotificationPriority {
-            return when {
-                urgencyScore >= 4 -> HIGH
-                urgencyScore >= 2 -> MEDIUM
-                else -> LOW
+            val clamped = urgencyScore.coerceIn(1, 6)
+            return when (clamped) {
+                5, 6 -> HIGH
+                3, 4 -> MEDIUM
+                else -> LOW // 1 or 2
             }
         }
     }
