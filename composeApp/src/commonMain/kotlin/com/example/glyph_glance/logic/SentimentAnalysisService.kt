@@ -314,35 +314,12 @@ class SentimentAnalysisService {
             val systemPrompt = "You are an urgency evaluator. Each request is independent with no conversation history. Output ONLY a number 1-6. No explanation."
             
             val userPrompt = """
-                This is a standalone request. Analyze ONLY this notification and its implied context:
-                
-                Rate urgency 1-6 based on how quickly the message should realistically be addressed:
-                1 = Very low priority – casual, informational, or can be safely ignored for a long time
-                2 = Low priority – can wait comfortably, no real pressure
-                3 = Slightly urgent – should be handled at some point soon
-                4 = Moderately urgent – should be handled soon, but not immediately
-                5 = Urgent – needs attention as soon as reasonably possible
-                6 = Extremely urgent / critical – needs attention right away (\"drop everything\")
-                
-                When deciding the score, use BOTH the sender/app name and the message content:
-                - WHO is involved: e.g. a boss, important client, or doctor is usually more important than a game or casual friend
-                - TYPE of sender: real people > automated systems > games/ads
-                - SITUATION: emergencies, safety issues, or very time-sensitive coordination (\"come here now\", \"we're starting\", \"I'm in trouble\") are more urgent
-                - CONTEXT examples:
-                  • Boss asking for something soon → higher urgency than a friend saying the same thing casually
-                  • A person telling you to go somewhere soon → higher urgency than a game asking you to log in
-                  • Clear emergency or crisis language → very high urgency
-                
-                Focus on how quickly a reasonable person should respond overall, not just specific keywords.
-                
-                Inferred app context (best guess based on name, may be wrong): $appContext
-                You will receive:
-                - Sender/App name: \"$senderId\"
-                - Message: \"$content\"
-                
-                Analyze them together when deciding the urgency score.
-                
-                Output ONLY the number (1, 2, 3, 4, 5, or 6):
+                Rate notification urgency 1(lowest)-6(critical).
+Scale: 1-2=Ignore/Casual, 3-4=Timely, 5-6=Immediate/Emergency.
+App: $appContext
+Sender: "$senderId"
+Msg: "$content"
+Output ONLY the integer.
             """.trimIndent()
             
             println("SentimentAnalysisService: Sending prompt to Qwen3 for message: '$content'")

@@ -124,6 +124,11 @@ fun DashboardScreen() {
     var selectedNotification by remember { mutableStateOf<ActivityNotification?>(null) }
     var showNotificationDetails by remember { mutableStateOf(false) }
     
+    // Track notification processing state for UI refresh
+    // Uses the same state check logic as the NotificationStatusCard
+    val isProcessing by com.example.glyph_glance.logging.LiveLogger.isProcessingNotification.collectAsState()
+    var wasProcessing by remember { mutableStateOf(false) }
+    
     // Helper function to format time ago
     fun formatTimeAgo(minutesAgo: Int): String {
         return when {
@@ -169,6 +174,35 @@ fun DashboardScreen() {
                 )
             })
         }
+    }
+    
+    // Refresh dashboard when notification analysis completes (isProcessing: true -> false)
+    // Uses the same state check logic as the NotificationStatusCard
+    LaunchedEffect(isProcessing) {
+        if (wasProcessing && !isProcessing) {
+            // Analysis just completed - trigger UI refresh by re-fetching notifications
+            notificationRepository?.getAllNotifications()?.collect { notifications ->
+                dbNotificationsList = notifications
+                val currentTime = System.currentTimeMillis()
+                allNotifications.clear()
+                allNotifications.addAll(notifications.map { dbNotif ->
+                    val minutesAgo = ((currentTime - dbNotif.timestamp) / (1000 * 60)).toInt()
+                    ActivityNotification(
+                        id = dbNotif.id,
+                        title = dbNotif.title,
+                        message = dbNotif.message,
+                        time = formatTimeAgo(minutesAgo),
+                        minutesAgo = minutesAgo,
+                        priority = dbNotif.priority,
+                        icon = getIconForApp(dbNotif.appName),
+                        sentiment = dbNotif.sentiment,
+                        urgencyScore = dbNotif.urgencyScore,
+                        rawAiResponse = dbNotif.rawAiResponse
+                    )
+                })
+            }
+        }
+        wasProcessing = isProcessing
     }
     
     // Load keywords, apps, and developer mode on first composition
