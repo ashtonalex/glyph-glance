@@ -28,6 +28,7 @@ class SentimentAnalysisService {
     private var cactusLM: CactusLM? = null
     private var _isInitialized = false
     private var _isModelDownloaded = false
+    private var _isModelLoadedInMemory = false
     
     /** Whether Cactus LM is initialized and ready */
     val isInitialized: Boolean get() = _isInitialized
@@ -35,9 +36,171 @@ class SentimentAnalysisService {
     /** Whether the model has been downloaded */
     val isModelDownloaded: Boolean get() = _isModelDownloaded
     
+    /** Whether the model is loaded into memory */
+    val isModelLoadedInMemory: Boolean get() = _isModelLoadedInMemory
+    
+    companion object {
+        private const val MODEL_SLUG = "qwen3-0.6"
+        private const val CONTEXT_SIZE = 2048
+        private const val PREFS_NAME = "cactus_model_prefs"
+        private const val KEY_MODEL_DOWNLOADED = "cactus_model_downloaded"
+    }
+    
     /**
-     * Initialize the Cactus LM with Qwen model
-     * Should be called once before using the service
+     * Check if the model has been downloaded persistently (survives app restarts).
+     * This uses platform-specific SharedPreferences on Android.
+     * 
+     * @param context Android Context (passed as Any for KMP compatibility)
+     * @return true if model was previously downloaded
+     */
+    fun isModelDownloadedPersistent(context: Any): Boolean {
+        return try {
+            val androidContext = context as android.content.Context
+            val prefs = androidContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            prefs.getBoolean(KEY_MODEL_DOWNLOADED, false)
+        } catch (e: Exception) {
+            println("SentimentAnalysisService: Error checking persistent model status: ${e.message}")
+            false
+        }
+    }
+    
+    /**
+     * Mark the model as downloaded in persistent storage.
+     * 
+     * @param context Android Context (passed as Any for KMP compatibility)
+     */
+    private fun setModelDownloadedPersistent(context: Any, downloaded: Boolean) {
+        try {
+            val androidContext = context as android.content.Context
+            val prefs = androidContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            prefs.edit().putBoolean(KEY_MODEL_DOWNLOADED, downloaded).apply()
+            println("SentimentAnalysisService: Persistent model download status set to: $downloaded")
+        } catch (e: Exception) {
+            println("SentimentAnalysisService: Error setting persistent model status: ${e.message}")
+        }
+    }
+    
+    /**
+     * Download the model if it hasn't been downloaded yet.
+     * This should only be called ONCE after app installation.
+     * Uses persistent storage to track download status across app restarts.
+     * 
+     * @param context Android Context (passed as Any for KMP compatibility)
+     * @return true if model is downloaded (either now or previously)
+     */
+    suspend fun downloadModelIfNeeded(context: Any): Boolean {
+        // Check if already downloaded persistently
+        if (isModelDownloadedPersistent(context)) {
+            println("SentimentAnalysisService: Model already downloaded (persistent check)")
+            _isModelDownloaded = true
+            LiveLogger.setModelDownloaded(true)
+            return true
+        }
+        
+        LiveLogger.addLog(
+            type = LogType.MODEL_DOWNLOAD,
+            message = "Downloading $MODEL_SLUG model (one-time)...",
+            status = LogStatus.PENDING
+        )
+        
+        return try {
+            val lm = CactusLM()
+            
+            println("SentimentAnalysisService: Downloading $MODEL_SLUG model (one-time download)...")
+            val downloadResult = lm.downloadModel(MODEL_SLUG)
+            println("SentimentAnalysisService: Download result: $downloadResult")
+            
+            // Convert result to Boolean (SDK may return Any in KMP)
+            val success = downloadResult as? Boolean ?: (downloadResult != null)
+            
+            if (success) {
+                // Mark as downloaded persistently so we don't download again
+                setModelDownloadedPersistent(context, true)
+                _isModelDownloaded = true
+                LiveLogger.setModelDownloaded(true)
+                
+                LiveLogger.addLog(
+                    type = LogType.MODEL_DOWNLOAD,
+                    message = "$MODEL_SLUG model downloaded successfully",
+                    status = LogStatus.SUCCESS
+                )
+                
+                println("SentimentAnalysisService: Model download completed and marked as persistent")
+            }
+            
+            success
+        } catch (e: Exception) {
+            println("SentimentAnalysisService: Error downloading model: ${e.message}")
+            e.printStackTrace()
+            LiveLogger.logError("Model Download", e.message ?: "Unknown error")
+            false
+        }
+    }
+    
+    /**
+     * Load the model into memory for inference.
+     * This should be called each time the app process starts.
+     * The model must be downloaded first via downloadModelIfNeeded().
+     * 
+     * @return true if model is loaded and ready for inference
+     */
+    suspend fun loadModelIntoMemory(): Boolean {
+        if (_isModelLoadedInMemory && cactusLM != null) {
+            println("SentimentAnalysisService: Model already loaded in memory")
+            return true
+        }
+        
+        LiveLogger.addLog(
+            type = LogType.CACTUS_INIT,
+            message = "Loading $MODEL_SLUG model into memory...",
+            status = LogStatus.PENDING
+        )
+        
+        return try {
+            val lm = CactusLM()
+            
+            println("SentimentAnalysisService: Initializing $MODEL_SLUG model into memory...")
+            val initResult = lm.initializeModel(
+                CactusInitParams(
+                    model = MODEL_SLUG,
+                    contextSize = CONTEXT_SIZE
+                )
+            )
+            println("SentimentAnalysisService: Initialization result: $initResult")
+            
+            // Convert result to Boolean (SDK may return Any in KMP)
+            val success = initResult as? Boolean ?: (initResult != null)
+            
+            if (success) {
+                cactusLM = lm
+                _isModelLoadedInMemory = true
+                _isInitialized = true
+                LiveLogger.setCactusInitialized(true)
+                
+                LiveLogger.addLog(
+                    type = LogType.CACTUS_INIT,
+                    message = "$MODEL_SLUG model loaded and ready",
+                    status = LogStatus.SUCCESS
+                )
+                
+                println("SentimentAnalysisService: Model loaded into memory successfully")
+            }
+            
+            success
+        } catch (e: Exception) {
+            println("SentimentAnalysisService: Error loading model into memory: ${e.message}")
+            e.printStackTrace()
+            LiveLogger.logError("Cactus Initialization", e.message ?: "Unknown error")
+            false
+        }
+    }
+    
+    /**
+     * Initialize the Cactus LM with Qwen model (legacy method for compatibility).
+     * This combines download and load - prefer using downloadModelIfNeeded() + loadModelIntoMemory()
+     * for better control over when downloads happen.
+     * 
+     * @deprecated Use downloadModelIfNeeded() and loadModelIntoMemory() instead
      */
     suspend fun initialize(): Boolean {
         if (_isInitialized) return true
@@ -51,37 +214,38 @@ class SentimentAnalysisService {
         return try {
             val lm = CactusLM()
             
-            // Download and initialize Qwen3-0.6B model
-            println("SentimentAnalysisService: Downloading Qwen3-0.6 model...")
+            // Download model (this may re-download if persistent check isn't available)
+            println("SentimentAnalysisService: Downloading $MODEL_SLUG model...")
             LiveLogger.addLog(
                 type = LogType.MODEL_DOWNLOAD,
-                message = "Downloading Qwen3-0.6 model...",
+                message = "Downloading $MODEL_SLUG model...",
                 status = LogStatus.PENDING
             )
             
-            val downloadResult = lm.downloadModel("qwen3-0.6")
+            val downloadResult = lm.downloadModel(MODEL_SLUG)
             println("SentimentAnalysisService: Download result: $downloadResult")
             
             _isModelDownloaded = true
             LiveLogger.setModelDownloaded(true)
             
-            println("SentimentAnalysisService: Initializing Qwen3-0.6 model...")
+            println("SentimentAnalysisService: Initializing $MODEL_SLUG model...")
             LiveLogger.addLog(
                 type = LogType.CACTUS_INIT,
-                message = "Initializing Qwen3-0.6 model...",
+                message = "Initializing $MODEL_SLUG model...",
                 status = LogStatus.PENDING
             )
             
             val initResult = lm.initializeModel(
                 CactusInitParams(
-                    model = "qwen3-0.6",
-                    contextSize = 2048
+                    model = MODEL_SLUG,
+                    contextSize = CONTEXT_SIZE
                 )
             )
             println("SentimentAnalysisService: Initialization result: $initResult")
             
             cactusLM = lm
             _isInitialized = true
+            _isModelLoadedInMemory = true
             LiveLogger.setCactusInitialized(true)
             
             println("SentimentAnalysisService: Qwen3 model initialized successfully")
@@ -95,6 +259,32 @@ class SentimentAnalysisService {
     }
     
     /**
+     * Ensure the model is ready for inference.
+     * Downloads if needed (using context) and loads into memory.
+     * 
+     * @param context Android Context for persistent download tracking
+     * @return true if model is ready for inference
+     */
+    suspend fun ensureReady(context: Any): Boolean {
+        // Step 1: Download if needed (one-time, persisted)
+        if (!_isModelDownloaded && !isModelDownloadedPersistent(context)) {
+            val downloaded = downloadModelIfNeeded(context)
+            if (!downloaded) {
+                return false
+            }
+        } else {
+            _isModelDownloaded = true
+        }
+        
+        // Step 2: Load into memory if needed (each process start)
+        if (!_isModelLoadedInMemory || cactusLM == null) {
+            return loadModelIntoMemory()
+        }
+        
+        return true
+    }
+    
+    /**
      * Analyze notification text for sentiment and urgency
      * 
      * @param content The notification message text
@@ -105,9 +295,10 @@ class SentimentAnalysisService {
         content: String,
         senderId: String
     ): AnalysisResult? {
-        if (!_isInitialized) {
-            val initSuccess = initialize()
-            if (!initSuccess) {
+        if (!_isInitialized || cactusLM == null) {
+            // Try to load model into memory (assumes download was done at app start)
+            val loadSuccess = loadModelIntoMemory()
+            if (!loadSuccess) {
                 return getDefaultResult()
             }
         }
@@ -348,8 +539,8 @@ class SentimentAnalysisService {
         cactusLM = null
         _isInitialized = false
         _isModelDownloaded = false
+        _isModelLoadedInMemory = false
         LiveLogger.setCactusInitialized(false)
         LiveLogger.setModelDownloaded(false)
     }
 }
-
