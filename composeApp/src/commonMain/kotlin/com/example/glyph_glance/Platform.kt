@@ -15,3 +15,13 @@ expect fun rememberPreferencesManager(): PreferencesManager
 
 @Composable
 expect fun rememberNotificationRepository(): NotificationRepository?
+
+@Composable
+expect fun rememberHasNotificationPermission(): Boolean
+
+@Composable
+expect fun rememberHasNotificationService(): Boolean
+
+expect fun openNotificationPermissionSettings()
+
+expect fun openNotificationServiceSettings()

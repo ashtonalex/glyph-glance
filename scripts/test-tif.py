@@ -84,7 +84,7 @@ NOTIFICATION_PRESETS = {
         ("AdNetwork", "You won't believe this one weird trick!", 1, "NOISE"),
         ("Casino App", "🎰 Spin the wheel for FREE coins!", 1, "NOISE"),
         ("Shopping App", "Items in your cart are selling fast!", 1, "NOISE"),
-    ],
+    ]
 }
 
 # Semantic keywords that should trigger urgency 6 (instant priority)
@@ -173,16 +173,37 @@ def send_notification(title: str, content: str, tag: str = "GLYPH_TEST") -> bool
     if not ADB_CMD:
         return False
     
-    safe_title = title.replace("'", "'\\''").replace('"', '\\"')
-    safe_content = content.replace("'", "'\\''").replace('"', '\\"')
+    # Sanitize text: keep only safe ASCII, no quotes or shell special chars
+    def sanitize(text: str) -> str:
+        safe_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?:-_@#')
+        result = ''.join(c if c in safe_chars else ' ' for c in text)
+        return ' '.join(result.split())  # Collapse spaces
     
-    cmd = f"{ADB_CMD} shell cmd notification post -S bigtext -t '{safe_title}' '{tag}' '{safe_content}'"
+    safe_title = sanitize(title)
+    safe_content = sanitize(content)
+    
+    # Get clean ADB path
+    adb = ADB_CMD.strip('"').strip("'")
     
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, shell=True, text=True)
+        # Use subprocess with list args to bypass shell - let adb handle quoting
+        result = subprocess.run(
+            [adb, "shell", "cmd", "notification", "post", 
+             "-S", "bigtext", 
+             "-t", safe_title,
+             tag, 
+             safe_content],
+            capture_output=True, 
+            text=True, 
+            check=True
+        )
         return True
     except subprocess.CalledProcessError as e:
-        print_error(f"Send failed: {e.stderr.strip()}")
+        err = e.stderr.strip() if e.stderr else e.stdout.strip() if e.stdout else "Unknown error"
+        print_error(f"Send failed: {err}")
+        return False
+    except FileNotFoundError:
+        print_error(f"ADB not found at: {adb}")
         return False
 
 def send_with_log(title: str, content: str, expected_urgency: int = None, category: str = None):

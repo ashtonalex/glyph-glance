@@ -28,6 +28,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     private lateinit var repository: NotificationRepositoryImpl
     private lateinit var preferencesManager: AndroidPreferencesManager
     private lateinit var intelligenceEngine: GlyphIntelligenceEngine
+    private lateinit var glyphManager: GlyphManager
     
     override fun onCreate() {
         super.onCreate()
@@ -48,11 +49,15 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         repository = NotificationRepositoryImpl(notificationDatabase.notificationDao())
         preferencesManager = AndroidPreferencesManager(applicationContext)
         
+        // Initialize GlyphManager
+        glyphManager = GlyphManager.getInstance(applicationContext)
+        glyphManager.initialize()
+        
         // Log service start
         LiveLogger.setServiceRunning(true)
         LiveLogger.setNotificationAccessEnabled(true)
         
-        Log.d(TAG, "Notification Listener Service Created with GlyphIntelligenceEngine")
+        Log.d(TAG, "Notification Listener Service Created with GlyphIntelligenceEngine and GlyphManager")
     }
     
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -147,7 +152,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 // User keywords take priority over pre-defined semantics
                 val userKeywords = keywordRules.map { it.keyword }
                 
-                // Calculate preference priority first to check for urgency 6
+                // Calculate preference priority FIRST to check for urgency 6
                 val preferencePriority = calculatePriority(
                     text = fullText,
                     appPackage = sbn.packageName,
@@ -158,16 +163,15 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 )
                 val preferenceUrgencyScore = preferencePriority.toUrgencyScore()
                 
-                // Process decision - skip AI if urgency 6 keyword found
+                // Process decision - skip AI entirely if urgency 6 keyword found
                 val finalUrgencyScore: Int
                 val finalPriority: NotificationPriority
                 val decision: DecisionResult
                 
                 if (preferenceUrgencyScore >= 6) {
-                    // Instant priority - skip AI processing entirely
+                    // Instant priority - skip AI and buffering for maximum speed
                     Log.d(TAG, "Urgency 6 keyword detected: $appName - skipping AI for instant priority")
                     
-                    // Transition from "Queuing" to "Thinking" (briefly)
                     LiveLogger.decrementQueuing()
                     LiveLogger.setProcessingNotification(true)
                     
@@ -233,12 +237,12 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                         "(Priority: $finalPriority, AI Urgency: ${decision.urgencyScore}, Final Urgency: $finalUrgencyScore, " +
                         "Sentiment: ${decision.sentiment}, Pattern: ${decision.pattern}, ShouldLightUp: ${decision.shouldLightUp})")
                 
-                // Handle glyph pattern if needed
-                if (decision.shouldLightUp) {
-                    handleGlyphPattern(decision.pattern)
-                } else {
-                    LiveLogger.logGlyphInteraction(decision.pattern.name, false)
-                }
+                // Handle glyph pattern - log and schedule flash based on urgency
+                handleGlyphPattern(decision.pattern)
+                
+                // Schedule glyph flash based on final urgency score
+                // This waits for UI to be ready before actually flashing
+                scheduleGlyphFlash(finalUrgencyScore, decision.shouldLightUp)
                 
                 // Processing complete
                 LiveLogger.setProcessingNotification(false)
@@ -288,20 +292,23 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         // Log glyph interaction
         LiveLogger.logGlyphInteraction(pattern.name, pattern != GlyphPattern.NONE)
         
-        // TODO: Implement actual glyph light control based on pattern
-        when (pattern) {
-            GlyphPattern.URGENT -> {
-                Log.d(TAG, "Triggering URGENT glyph pattern")
-                // Trigger urgent/strobe pattern
-            }
-            GlyphPattern.AMBER_BREATHE -> {
-                Log.d(TAG, "Triggering AMBER_BREATHE glyph pattern")
-                // Trigger amber breathing pattern
-            }
-            GlyphPattern.NONE -> {
-                // No pattern needed
-            }
+        // Note: Glyph flashing is now handled via scheduleFlashForUrgency
+        // which waits for UI to be ready before flashing
+        Log.d(TAG, "Glyph pattern determined: ${pattern.name} (flash scheduled via urgency score)")
+    }
+    
+    /**
+     * Schedule glyph flash based on final urgency score.
+     * This waits for UI to update before flashing.
+     */
+    private fun scheduleGlyphFlash(urgencyScore: Int, shouldLightUp: Boolean) {
+        if (!shouldLightUp) {
+            Log.d(TAG, "Glyph flash skipped - shouldLightUp is false")
+            return
         }
+        
+        Log.d(TAG, "Scheduling glyph flash for urgency: $urgencyScore")
+        glyphManager.scheduleFlashForUrgency(urgencyScore)
     }
     
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
@@ -312,6 +319,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     override fun onDestroy() {
         super.onDestroy()
         notificationDatabase.close()
+        
+        // Cleanup GlyphManager
+        glyphManager.cleanup()
         
         // Log service stop
         LiveLogger.setServiceRunning(false)
