@@ -27,5 +27,19 @@ enum class NotificationPriority {
                 else -> LOW                   // IMPORTANCE_LOW and below
             }
         }
+        
+        /**
+         * Converts urgency score (1-5) to priority level
+         * 5, 4 -> HIGH
+         * 3, 2 -> MEDIUM
+         * 1 -> LOW
+         */
+        fun fromUrgencyScore(urgencyScore: Int): NotificationPriority {
+            return when {
+                urgencyScore >= 4 -> HIGH
+                urgencyScore >= 2 -> MEDIUM
+                else -> LOW
+            }
+        }
     }
 }

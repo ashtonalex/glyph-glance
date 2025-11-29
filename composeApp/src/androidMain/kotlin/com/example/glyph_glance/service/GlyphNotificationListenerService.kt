@@ -113,14 +113,28 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     basePriority = basePriority
                 )
                 
-                // Create notification model with calculated priority and sentiment analysis results
-                // Urgency score reflects the final priority (after rules), not just AI analysis
-                val finalUrgencyScore = calculatedPriority.toUrgencyScore()
+                // Determine final urgency score
+                val aiUrgencyScore = analysisResult?.urgencyScore ?: 3
+                val rulesMatched = calculatedPriority != basePriority
+                
+                val finalUrgencyScore = if (rulesMatched) {
+                    // If rules matched, use the maximum of AI score and rule-based score
+                    // This ensures AI score is never lowered, but rules can increase it
+                    val ruleBasedUrgencyScore = calculatedPriority.toUrgencyScore()
+                    maxOf(aiUrgencyScore, ruleBasedUrgencyScore)
+                } else {
+                    // If no rules matched, use AI urgency score directly
+                    aiUrgencyScore
+                }
+                
+                // Final priority should match the final urgency score
+                val finalPriority = NotificationPriority.fromUrgencyScore(finalUrgencyScore)
+                
                 val notificationModel = com.example.glyph_glance.data.models.Notification(
                     title = title,
                     message = message,
                     timestamp = sbn.postTime,
-                    priority = calculatedPriority,
+                    priority = finalPriority,
                     appPackage = sbn.packageName,
                     appName = appName,
                     sentiment = analysisResult?.sentiment,
@@ -130,8 +144,8 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 // Save to database
                 repository.insertNotification(notificationModel)
                 
-                Log.d(TAG, "Saved notification: $title from $appName (Priority: $calculatedPriority (base: $basePriority), " +
-                        "Sentiment: ${analysisResult?.sentiment}, Urgency: ${analysisResult?.urgencyScore})")
+                Log.d(TAG, "Saved notification: $title from $appName (Priority: $finalPriority (rule-based: $calculatedPriority, base: $basePriority), " +
+                        "Sentiment: ${analysisResult?.sentiment}, AI Urgency: ${analysisResult?.urgencyScore}, Final Urgency: $finalUrgencyScore)")
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing notification", e)
                 // Save without sentiment if analysis fails, but still try to calculate priority

@@ -38,15 +38,19 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.glyph_glance.data.models.AppRule
 import com.example.glyph_glance.data.models.KeywordRule
 import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.models.UserProfile
+import com.example.glyph_glance.data.models.Notification as DbNotification
 import com.example.glyph_glance.logic.AnalysisResult
 import com.example.glyph_glance.logic.SentimentAnalysisService
 import com.example.glyph_glance.logic.calculatePriority
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 enum class ActivityFilter {
@@ -63,6 +67,7 @@ enum class SortOption {
 
 // Sample notification data structure for display
 data class ActivityNotification(
+    val id: Long = 0, // Database ID for deletion
     val title: String,
     val message: String,
     val time: String,
@@ -77,6 +82,7 @@ data class ActivityNotification(
 fun DashboardScreen() {
     val themeColors = LocalThemeColors.current
     val prefsManager = rememberPreferencesManager()
+    val notificationRepository = rememberNotificationRepository()
     val coroutineScope = rememberCoroutineScope()
     
     // Recent Activity state
@@ -109,29 +115,9 @@ fun DashboardScreen() {
     var isAnalyzing by remember { mutableStateOf(false) }
     var testError by remember { mutableStateOf<String?>(null) }
     var testSuccess by remember { mutableStateOf(false) }
-    
-    // Notifications list - starts with sample data, can be updated with test results
-    val allNotifications = remember { 
-        mutableStateListOf(
-            ActivityNotification("Message from Alex", "Hey, are we still on for tonight?", "1m ago", 1, NotificationPriority.HIGH, Icons.Default.Star, "POSITIVE", 2),
-            ActivityNotification("Email from Work", "Meeting reminder at 3 PM", "3m ago", 3, NotificationPriority.MEDIUM, Icons.Default.Person, "NEUTRAL", 3),
-            ActivityNotification("Social Update", "You have 5 new followers", "5m ago", 5, NotificationPriority.LOW, Icons.Default.Notifications, "POSITIVE", 1),
-            ActivityNotification("Urgent Alert", "System update required", "7m ago", 7, NotificationPriority.HIGH, Icons.Default.Star, "NEUTRAL", 4),
-            ActivityNotification("News Update", "Breaking news in your area", "10m ago", 10, NotificationPriority.MEDIUM, Icons.Default.Person, "NEUTRAL", 3),
-            ActivityNotification("Weather Alert", "Rain expected this afternoon", "12m ago", 12, NotificationPriority.LOW, Icons.Default.Notifications, "NEUTRAL", 2),
-            ActivityNotification("Important Message", "Payment due tomorrow", "15m ago", 15, NotificationPriority.HIGH, Icons.Default.Star, "NEGATIVE", 4),
-            ActivityNotification("Calendar Event", "Team meeting in 30 minutes", "18m ago", 18, NotificationPriority.MEDIUM, Icons.Default.Person, "NEUTRAL", 3),
-            ActivityNotification("App Notification", "New feature available", "20m ago", 20, NotificationPriority.LOW, Icons.Default.Notifications, "POSITIVE", 1),
-            ActivityNotification("Critical Update", "Security patch available", "25m ago", 25, NotificationPriority.HIGH, Icons.Default.Star, "NEUTRAL", 5)
-        )
-    }
-    
-    // Load keywords, apps, and developer mode on first composition
-    LaunchedEffect(Unit) {
-        keywords = prefsManager.getKeywordRules()
-        appRules = prefsManager.getAppRules()
-        developerMode = prefsManager.getDeveloperMode()
-    }
+    var showRawAiResponse by remember { mutableStateOf(false) }
+    var finalUrgencyScore by remember { mutableStateOf<Int?>(null) }
+    var rulesMatched by remember { mutableStateOf(false) }
     
     // Helper function to format time ago
     fun formatTimeAgo(minutesAgo: Int): String {
@@ -150,6 +136,40 @@ fun DashboardScreen() {
             appName.contains("Email", ignoreCase = true) || appName.contains("Mail", ignoreCase = true) -> Icons.Default.Person
             else -> Icons.Default.Notifications
         }
+    }
+    
+    // Load notifications from database
+    val allNotifications = remember { mutableStateListOf<ActivityNotification>() }
+    var dbNotificationsList by remember { mutableStateOf<List<DbNotification>>(emptyList()) }
+    
+    // Update notifications when database changes
+    LaunchedEffect(notificationRepository) {
+        notificationRepository?.getAllNotifications()?.collect { notifications ->
+            dbNotificationsList = notifications
+            val currentTime = System.currentTimeMillis()
+            allNotifications.clear()
+            allNotifications.addAll(notifications.map { dbNotif ->
+                val minutesAgo = ((currentTime - dbNotif.timestamp) / (1000 * 60)).toInt()
+                ActivityNotification(
+                    id = dbNotif.id,
+                    title = dbNotif.title,
+                    message = dbNotif.message,
+                    time = formatTimeAgo(minutesAgo),
+                    minutesAgo = minutesAgo,
+                    priority = dbNotif.priority,
+                    icon = getIconForApp(dbNotif.appName),
+                    sentiment = dbNotif.sentiment,
+                    urgencyScore = dbNotif.urgencyScore
+                )
+            })
+        }
+    }
+    
+    // Load keywords, apps, and developer mode on first composition
+    LaunchedEffect(Unit) {
+        keywords = prefsManager.getKeywordRules()
+        appRules = prefsManager.getAppRules()
+        developerMode = prefsManager.getDeveloperMode()
     }
     
     // Filter and sort notifications
@@ -221,6 +241,9 @@ fun DashboardScreen() {
                     isAnalyzing = isAnalyzing,
                     testError = testError,
                     testSuccess = testSuccess,
+                    showRawAiResponse = showRawAiResponse,
+                    onShowRawAiResponseChange = { showRawAiResponse = it },
+                    finalUrgencyScore = finalUrgencyScore,
                     onAnalyze = {
                         coroutineScope.launch {
                             isAnalyzing = true
@@ -228,6 +251,9 @@ fun DashboardScreen() {
                             testResult = null
                             calculatedPriority = null
                             testSuccess = false
+                            showRawAiResponse = false
+                            finalUrgencyScore = null
+                            rulesMatched = false
                             try {
                                 // Step 1: Perform sentiment analysis
                                 val analysisResult = sentimentAnalysisService.analyzeNotification(
@@ -242,7 +268,7 @@ fun DashboardScreen() {
                                 
                                 // Step 3: Calculate priority based on rules
                                 // Pass both package name and app name so app rules can match by either
-                                val finalPriority = calculatePriority(
+                                val ruleBasedPriority = calculatePriority(
                                     text = testInput,
                                     appPackage = "com.test.${testSender.lowercase().replace(" ", "")}",
                                     appName = testSender,
@@ -250,20 +276,38 @@ fun DashboardScreen() {
                                     appRules = appRules,
                                     basePriority = NotificationPriority.MEDIUM // Default base priority for tests
                                 )
-                                calculatedPriority = finalPriority
                                 
-                                // Step 4: Create notification entry and add to Recent Activity
-                                // Urgency score reflects the final priority (after rules)
-                                val finalUrgencyScore = finalPriority.toUrgencyScore()
+                                // Step 4: Determine final urgency score and priority
+                                val basePriority = NotificationPriority.MEDIUM // Default base priority for tests
+                                val aiUrgencyScore = analysisResult?.urgencyScore ?: 3
+                                val rulesMatchedValue = ruleBasedPriority != basePriority
+                                rulesMatched = rulesMatchedValue
+                                
+                                val finalUrgencyScoreValue = if (rulesMatchedValue) {
+                                    // If rules matched, use the maximum of AI score and rule-based score
+                                    // This ensures AI score is never lowered, but rules can increase it
+                                    val ruleBasedUrgencyScore = ruleBasedPriority.toUrgencyScore()
+                                    maxOf(aiUrgencyScore, ruleBasedUrgencyScore)
+                                } else {
+                                    // If no rules matched, use AI urgency score directly
+                                    aiUrgencyScore
+                                }
+                                finalUrgencyScore = finalUrgencyScoreValue
+                                
+                                // Final priority should match the final urgency score
+                                val finalPriorityFromUrgency = NotificationPriority.fromUrgencyScore(finalUrgencyScoreValue)
+                                calculatedPriority = finalPriorityFromUrgency
+                                
                                 val testNotification = ActivityNotification(
+                                    id = 0, // Test notifications don't have database IDs
                                     title = "Test: $testSender",
                                     message = testInput,
                                     time = "Just now",
                                     minutesAgo = 0,
-                                    priority = finalPriority,
+                                    priority = finalPriorityFromUrgency,
                                     icon = getIconForApp(testSender),
                                     sentiment = analysisResult?.sentiment,
-                                    urgencyScore = finalUrgencyScore
+                                    urgencyScore = finalUrgencyScoreValue
                                 )
                                 
                                 // Add to the beginning of the list
@@ -492,15 +536,26 @@ fun DashboardScreen() {
                                     NotificationPriority.MEDIUM -> themeColors.mediumPriority
                                     NotificationPriority.LOW -> themeColors.lowPriority
                                 }
-                                NotificationItem(
-                                    title = notification.title,
-                                    message = notification.message,
-                                    time = notification.time,
-                                    importanceColor = importanceColor,
-                                    icon = notification.icon,
-                                    sentiment = notification.sentiment,
-                                    urgencyScore = notification.urgencyScore
-                                )
+                                AnimatedDeleteWrapper(
+                                    onDelete = {
+                                        if (notification.id > 0 && notificationRepository != null) {
+                                            coroutineScope.launch {
+                                                notificationRepository.deleteNotification(notification.id)
+                                            }
+                                        }
+                                    }
+                                ) { deleteHandler ->
+                                    NotificationItem(
+                                        title = notification.title,
+                                        message = notification.message,
+                                        time = notification.time,
+                                        importanceColor = importanceColor,
+                                        icon = notification.icon,
+                                        sentiment = notification.sentiment,
+                                        urgencyScore = notification.urgencyScore,
+                                        onDelete = deleteHandler
+                                    )
+                                }
                                 if (index < filteredNotifications.size - 1) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                 }
@@ -1335,6 +1390,9 @@ fun SentimentTestSection(
     isAnalyzing: Boolean,
     testError: String?,
     testSuccess: Boolean,
+    showRawAiResponse: Boolean,
+    onShowRawAiResponseChange: (Boolean) -> Unit,
+    finalUrgencyScore: Int?,
     onAnalyze: () -> Unit
 ) {
     val themeColors = LocalThemeColors.current
@@ -1532,8 +1590,60 @@ fun SentimentTestSection(
                                     }
                                 }
                                 
+                                // Raw AI Response (for debugging) - clickable to expand
+                                testResult.rawAiResponse?.let { rawResponse ->
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { onShowRawAiResponseChange(!showRawAiResponse) },
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Raw AI Response:",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = TextGrey,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Icon(
+                                                imageVector = if (showRawAiResponse) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                                contentDescription = if (showRawAiResponse) "Collapse" else "Expand",
+                                                tint = TextGrey,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                        
+                                        AnimatedVisibility(
+                                            visible = showRawAiResponse,
+                                            enter = expandVertically() + fadeIn(),
+                                            exit = shrinkVertically() + fadeOut()
+                                        ) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .background(
+                                                        SurfaceDarkGrey.copy(alpha = 0.5f),
+                                                        RoundedCornerShape(8.dp)
+                                                    )
+                                                    .padding(12.dp)
+                                            ) {
+                                                Text(
+                                                    text = rawResponse,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TextWhite,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                
                                 // Final Urgency Score (after rules)
-                                if (calculatedPriority != null) {
+                                if (calculatedPriority != null && testResult != null) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1548,9 +1658,10 @@ fun SentimentTestSection(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
-                                            // Score display with color based on final priority
-                                            val finalUrgencyScore = calculatedPriority.toUrgencyScore()
-                                            val finalUrgencyColor = when (finalUrgencyScore) {
+                                            // Use the stored final urgency score, or calculate it if not available
+                                            val displayFinalUrgencyScore = finalUrgencyScore ?: testResult.urgencyScore
+                                            
+                                            val finalUrgencyColor = when (displayFinalUrgencyScore) {
                                                 5 -> themeColors.highPriority
                                                 4 -> themeColors.highPriority.copy(alpha = 0.8f)
                                                 3 -> themeColors.mediumPriority
@@ -1558,7 +1669,7 @@ fun SentimentTestSection(
                                                 else -> themeColors.lowPriority
                                             }
                                             Text(
-                                                text = "$finalUrgencyScore/5",
+                                                text = "$displayFinalUrgencyScore/5",
                                                 style = MaterialTheme.typography.headlineSmall,
                                                 color = finalUrgencyColor,
                                                 fontWeight = FontWeight.Bold
@@ -1572,7 +1683,7 @@ fun SentimentTestSection(
                                                         modifier = Modifier
                                                             .size(8.dp)
                                                             .background(
-                                                                if (index < finalUrgencyScore) finalUrgencyColor else TextGrey.copy(alpha = 0.3f),
+                                                                if (index < displayFinalUrgencyScore) finalUrgencyColor else TextGrey.copy(alpha = 0.3f),
                                                                 CircleShape
                                                             )
                                                     )
@@ -1606,7 +1717,7 @@ fun SentimentTestSection(
                                     )
                                 }
                                 
-                                // Calculated Priority (after rules)
+                                // Final Priority (matches final urgency score)
                                 if (calculatedPriority != null) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),

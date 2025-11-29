@@ -16,3 +16,9 @@ actual fun getPlatform(): Platform = IOSPlatform()
 actual fun rememberPreferencesManager(): PreferencesManager {
     return remember { InMemoryPreferencesManager() }
 }
+
+@Composable
+actual fun rememberNotificationRepository(): NotificationRepository? {
+    // iOS implementation - return null for now
+    return remember { null }
+}
