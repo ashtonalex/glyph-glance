@@ -159,7 +159,7 @@ data class AIResult(val urgencyScore: Int, val sentiment: String)
 
 **Location:** `composeApp/src/commonMain/kotlin/com/example/glyph_glance/logic/GlyphIntelligenceEngine.kt`
 
-**Purpose:** Orchestrates the full notification processing pipeline.
+**Purpose:** Orchestrates the full notification processing pipeline, integrating AI analysis with contact profiles and database rules.
 
 **Signature:**
 ```kotlin
@@ -167,20 +167,32 @@ override suspend fun processNotification(text: String, senderId: String): Decisi
 ```
 
 **Key Operations:**
-1. Fetches or creates contact profile
-2. Updates contact statistics
-3. Calls `cactusManager.analyzeText()` for AI analysis
-4. Fetches active rules from database
-5. Matches rules against AI result and notification content
-6. Returns decision (should light up, glyph pattern)
+1. Fetches or creates contact profile from `ContactDao`
+2. Updates contact statistics with current timestamp
+3. Calls `sentimentAnalysisService.analyzeNotification()` for AI analysis (1-6 urgency scale)
+4. Fetches active rules from `RuleDao` database
+5. Matches rules against notification text and sender
+6. Determines glyph pattern based on urgency score:
+   - Score >= 5: `URGENT` pattern
+   - Score >= 4 or rule triggered: `AMBER_BREATHE` pattern
+   - Otherwise: `NONE`
+7. Returns comprehensive decision with all analysis data
 
 **Return Type:**
 ```kotlin
 data class DecisionResult(
     val shouldLightUp: Boolean,
-    val pattern: GlyphPattern
+    val pattern: GlyphPattern,
+    // Analysis data from SentimentAnalysisService
+    val urgencyScore: Int,
+    val sentiment: String,
+    val rawAiResponse: String? = null,
+    // Rule matching info
+    val triggeredRuleId: Int? = null
 )
 ```
+
+**Integration:** This engine is instantiated via `AppModule` and used by `GlyphNotificationListenerService` for all notification processing.
 
 ---
 
@@ -188,7 +200,7 @@ data class DecisionResult(
 
 **Location:** `composeApp/src/androidMain/kotlin/com/example/glyph_glance/service/GlyphNotificationListenerService.kt`
 
-**Purpose:** Android system service that intercepts all device notifications.
+**Purpose:** Android system service that intercepts all device notifications and processes them through the intelligence engine.
 
 **Signature:**
 ```kotlin
@@ -198,11 +210,15 @@ override fun onNotificationPosted(sbn: StatusBarNotification)
 **Key Operations:**
 1. Extracts notification title and message
 2. Determines base priority from Android notification importance
-3. Performs sentiment analysis via `sentimentAnalysisService.analyzeNotification()`
-4. Loads keyword and app rules from preferences
-5. Calculates final priority using `calculatePriority()`
-6. Combines AI score with rule-based score (takes maximum)
-7. Saves notification to Room database with all metadata
+3. Processes notification through `GlyphIntelligenceEngine.processNotification()` which:
+   - Performs AI sentiment analysis
+   - Tracks contact profiles
+   - Matches database rules
+   - Returns glyph pattern decision
+4. Also loads keyword and app rules from preferences via `calculatePriority()`
+5. Combines AI urgency with preference-based rules (takes maximum)
+6. Saves notification to Room database with all metadata
+7. Triggers glyph pattern if `decision.shouldLightUp` is true
 
 ---
 
@@ -248,6 +264,14 @@ fun calculatePriority(
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
+│  GlyphIntelligenceEngine.processNotification()                              │
+│  - Fetch/create contact profile (ContactDao)                                │
+│  - Update contact stats with timestamp                                      │
+│  - Match against database rules (RuleDao)                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
 │  SentimentAnalysisService.analyzeNotification()                             │
 │  - Infer app context from sender ID                                         │
 │  - Build system + user prompt for Qwen3                                     │
@@ -258,8 +282,18 @@ fun calculatePriority(
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  calculatePriority()                                                        │
-│  - Load keyword rules and app rules                                         │
+│  GlyphIntelligenceEngine - DECISION                                         │
+│  - Determine glyph pattern based on urgency:                                │
+│    • Score >= 5: URGENT pattern                                             │
+│    • Score >= 4 or rule triggered: AMBER_BREATHE pattern                    │
+│    • Otherwise: NONE                                                        │
+│  - Return DecisionResult with urgency, sentiment, pattern                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  calculatePriority() - PREFERENCES RULES                                    │
+│  - Load keyword rules and app rules from preferences                        │
 │  - Match against notification text                                          │
 │  - Return highest priority found                                            │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -267,8 +301,7 @@ fun calculatePriority(
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  FINAL URGENCY CALCULATION                                                  │
-│  - If rules matched: max(aiUrgencyScore, ruleBasedUrgencyScore)             │
-│  - If no rules: use AI urgency score directly                               │
+│  - Combine: max(aiUrgencyScore, preferenceRuleUrgencyScore)                 │
 │  - Convert to NotificationPriority enum                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
@@ -279,6 +312,14 @@ fun calculatePriority(
 │    • title, message, timestamp                                              │
 │    • appPackage, appName                                                    │
 │    • priority, sentiment, urgencyScore                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  handleGlyphPattern()                                                       │
+│  - If shouldLightUp is true:                                                │
+│    • URGENT: Trigger strobe pattern                                         │
+│    • AMBER_BREATHE: Trigger breathing pattern                               │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -322,11 +363,11 @@ Uses tag `GlyphNotificationListener` for logcat filtering.
 
 **Example Log Output:**
 ```
-D/GlyphNotificationListener: Notification Listener Service Created
-D/GlyphNotificationListener: Sentiment analysis service initialized successfully
+D/GlyphNotificationListener: Notification Listener Service Created with GlyphIntelligenceEngine
 D/GlyphNotificationListener: Saved notification: Meeting Reminder from Calendar 
-    (Priority: HIGH (rule-based: MEDIUM, base: LOW), 
-     Sentiment: NEUTRAL, AI Urgency: 4, Final Urgency: 5)
+    (Priority: HIGH, AI Urgency: 4, Final Urgency: 5, 
+     Sentiment: NEUTRAL, Pattern: AMBER_BREATHE, ShouldLightUp: true)
+D/GlyphNotificationListener: Triggering AMBER_BREATHE glyph pattern
 ```
 
 ---
@@ -337,11 +378,13 @@ D/GlyphNotificationListener: Saved notification: Meeting Reminder from Calendar
 
 | File | Purpose |
 |------|---------|
-| `ai/CactusManager.kt` | Mock toggle, legacy LLM interface |
-| `logic/SentimentAnalysisService.kt` | Primary LLM analysis service |
-| `logic/GlyphIntelligenceEngine.kt` | Notification processing orchestration |
-| `logic/PriorityCalculator.kt` | Rule-based priority calculation |
-| `service/GlyphNotificationListenerService.kt` | Android notification interception |
+| `ai/CactusManager.kt` | Mock toggle, legacy LLM interface (not used in main flow) |
+| `logic/SentimentAnalysisService.kt` | Primary LLM analysis service (used by GlyphIntelligenceEngine) |
+| `logic/GlyphIntelligenceEngine.kt` | Main notification processing orchestrator - AI + contacts + rules |
+| `logic/Interfaces.kt` | `DecisionResult` with urgency, sentiment, pattern, and rule info |
+| `logic/PriorityCalculator.kt` | Preference-based priority calculation |
+| `di/AppModule.kt` | DI container - initializes SentimentAnalysisService and GlyphIntelligenceEngine |
+| `service/GlyphNotificationListenerService.kt` | Android notification interception, uses GlyphIntelligenceEngine |
 | `DashboardScreen.kt` | UI toggle for raw AI response visibility |
 
 ### Cactus SDK Integration
@@ -384,9 +427,14 @@ This ensures robust parsing even when the LLM includes explanation text despite 
 
 The Glyph Glance LLM integration provides:
 
+- **Unified processing** via `GlyphIntelligenceEngine` which orchestrates AI analysis, contact profiles, and rule matching
 - **Flexible toggling** via mock mode for development and UI toggle for debugging
 - **Comprehensive logging** at both console and Android logcat levels
 - **Robust response handling** with multiple parsing fallback strategies
-- **Rule augmentation** where user-defined rules can boost (but never lower) AI scores
-- **Full traceability** with raw AI responses stored in `AnalysisResult.rawAiResponse`
+- **Dual rule systems**:
+  - Database rules (Rule entity) matched by `GlyphIntelligenceEngine`
+  - Preference rules (keyword/app rules) applied via `calculatePriority()`
+- **Glyph pattern decisions** based on urgency score (URGENT >= 5, AMBER_BREATHE >= 4)
+- **Contact profile tracking** with timestamp updates for split-texter detection
+- **Full traceability** with raw AI responses stored in `DecisionResult.rawAiResponse`
 
