@@ -152,23 +152,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 // User keywords take priority over pre-defined semantics
                 val userKeywords = keywordRules.map { it.keyword }
                 
-
-                // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
-                // This will wait for the 5-second buffering window
-                val decision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
-                
-                // If notification was buffered (superseded by a newer one), stop processing here
-                if (decision.isBuffered) {
-                    Log.d(TAG, "Notification buffered/superseded: $title from $appName - Skipping save/notify")
-                    // Decrement queuing counter for buffered notification
-                    LiveLogger.decrementQueuing()
-                    return@launch
-                }
-                
-                // Now that buffering is complete, transition from "Queuing" to "Thinking"
-                LiveLogger.decrementQueuing()
-                LiveLogger.setProcessingNotification(true)
-
+                // Calculate preference priority first to check for urgency 6
                 val preferencePriority = calculatePriority(
                     text = fullText,
                     appPackage = sbn.packageName,
@@ -179,14 +163,19 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 )
                 val preferenceUrgencyScore = preferencePriority.toUrgencyScore()
                 
-                // If user keyword rules give urgency 6, skip AI for instant priority
+                // Process decision - skip AI if urgency 6 keyword found
                 val finalUrgencyScore: Int
                 val finalPriority: NotificationPriority
                 val decision: DecisionResult
                 
                 if (preferenceUrgencyScore >= 6) {
-                    // Instant priority - skip AI processing
+                    // Instant priority - skip AI processing entirely
                     Log.d(TAG, "Urgency 6 keyword detected: $appName - skipping AI for instant priority")
+                    
+                    // Transition from "Queuing" to "Thinking" (briefly)
+                    LiveLogger.decrementQueuing()
+                    LiveLogger.setProcessingNotification(true)
+                    
                     LiveLogger.addLog(
                         type = com.example.glyph_glance.logging.LogType.AI_RESPONSE,
                         message = "⚡ Instant Priority: $appName (urgency → 6, AI skipped)",
@@ -208,7 +197,21 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     )
                 } else {
                     // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
-                    decision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
+                    // This will wait for the 5-second buffering window
+                    val engineDecision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
+                    
+                    // If notification was buffered (superseded by a newer one), stop processing here
+                    if (engineDecision.isBuffered) {
+                        Log.d(TAG, "Notification buffered/superseded: $title from $appName - Skipping save/notify")
+                        LiveLogger.decrementQueuing()
+                        return@launch
+                    }
+                    
+                    // Now that buffering is complete, transition from "Queuing" to "Thinking"
+                    LiveLogger.decrementQueuing()
+                    LiveLogger.setProcessingNotification(true)
+                    
+                    decision = engineDecision
                     
                     // Combine AI urgency with preference rules (take maximum)
                     finalUrgencyScore = maxOf(decision.urgencyScore, preferenceUrgencyScore)
