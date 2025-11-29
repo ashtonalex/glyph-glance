@@ -106,15 +106,53 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     title.ifEmpty { message }
                 }
                 
+                // Load user-defined keyword and app rules from preferences
+                val keywordRules = preferencesManager.getKeywordRules()
+                val appRules = preferencesManager.getAppRules()
+                
+                // Check if this app is ignored - skip AI analysis and assign urgency 1
+                val isAppIgnored = appRules.any { rule ->
+                    rule.isIgnored && (
+                        rule.appName.equals(appName, ignoreCase = true) ||
+                        rule.packageName.equals(sbn.packageName, ignoreCase = true)
+                    )
+                }
+                
+                if (isAppIgnored) {
+                    // Skip AI analysis for ignored apps - just save with urgency 1
+                    Log.d(TAG, "App ignored: $appName - skipping AI, assigning urgency 1")
+                    LiveLogger.addLog(
+                        type = com.example.glyph_glance.logging.LogType.SERVICE_STATUS,
+                        message = "Ignored: $appName (urgency → 1, no AI)",
+                        status = com.example.glyph_glance.logging.LogStatus.INFO
+                    )
+                    
+                    val notificationModel = com.example.glyph_glance.data.models.Notification(
+                        title = title,
+                        message = message,
+                        timestamp = sbn.postTime,
+                        priority = NotificationPriority.LOW,
+                        appPackage = sbn.packageName,
+                        appName = appName,
+                        sentiment = "NEUTRAL",
+                        urgencyScore = 1, // Forced to lowest urgency
+                        rawAiResponse = "[App Ignored - AI analysis skipped]"
+                    )
+                    
+                    repository.insertNotification(notificationModel)
+                    LiveLogger.logGlyphInteraction("NONE", false) // No glyph for ignored apps
+                    return@launch
+                }
+                
                 // Set processing state for UI feedback
                 LiveLogger.setProcessingNotification(true)
                 
-                // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
-                val decision = intelligenceEngine.processNotification(fullText, appName)
+                // Extract keyword strings for semantic exclusion
+                // User keywords take priority over pre-defined semantics
+                val userKeywords = keywordRules.map { it.keyword }
                 
-                // Also apply preferences-based rules (keyword and app rules from preferences)
-                val keywordRules = preferencesManager.getKeywordRules()
-                val appRules = preferencesManager.getAppRules()
+                // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
+                val decision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
                 val preferencePriority = calculatePriority(
                     text = fullText,
                     appPackage = sbn.packageName,

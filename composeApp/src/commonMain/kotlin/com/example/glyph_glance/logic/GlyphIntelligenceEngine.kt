@@ -1,5 +1,6 @@
 package com.example.glyph_glance.logic
 
+import com.example.glyph_glance.data.models.SemanticMatchResult
 import com.example.glyph_glance.database.ContactDao
 import com.example.glyph_glance.database.ContactProfile
 import com.example.glyph_glance.database.Rule
@@ -8,11 +9,16 @@ import kotlinx.datetime.Clock
 
 class GlyphIntelligenceEngine(
     private val sentimentAnalysisService: SentimentAnalysisService,
+    private val semanticMatcher: SemanticMatcher,
     private val ruleDao: RuleDao,
     private val contactDao: ContactDao
 ) : IntelligenceEngine {
 
-    override suspend fun processNotification(text: String, senderId: String): DecisionResult {
+    override suspend fun processNotification(
+        text: String, 
+        senderId: String,
+        userKeywords: List<String>
+    ): DecisionResult {
         // 1. Fetch Profile & Check "Split Texter" Logic
         var profile = contactDao.getProfile(senderId)
         if (profile == null) {
@@ -25,30 +31,92 @@ class GlyphIntelligenceEngine(
 
         // 2. AI Analysis using SentimentAnalysisService
         val analysisResult = sentimentAnalysisService.analyzeNotification(text, senderId)
-        val urgencyScore = analysisResult?.urgencyScore ?: 3
+        val aiUrgencyScore = analysisResult?.urgencyScore ?: 3
         val sentiment = analysisResult?.sentiment ?: "NEUTRAL"
         val rawAiResponse = analysisResult?.rawAiResponse
+        
+        // 3. Semantic Keyword Matching (boosts urgency based on key phrases)
+        // User-defined keywords take priority over pre-defined semantics
+        val semanticResult = semanticMatcher.match(text, userKeywords)
+        val semanticAdjustedScore = if (semanticResult.matched) {
+            maxOf(aiUrgencyScore, semanticResult.highestLevel)
+        } else {
+            aiUrgencyScore
+        }
 
-        // 3. Rule Matching
+        // 4. Rule Matching (database rules)
         val activeRules = ruleDao.getAllRules()
-        val triggeredRule = matchRules(urgencyScore, text, senderId, activeRules)
+        val triggeredRule = matchRules(semanticAdjustedScore, text, senderId, activeRules)
+        
+        // Final urgency score after all adjustments
+        val finalUrgencyScore = semanticAdjustedScore
 
-        // 4. Determine Glyph Pattern based on urgency and rules
-        val shouldLightUp = triggeredRule != null || urgencyScore >= 4
+        // 5. Determine Glyph Pattern based on urgency and rules
+        val shouldLightUp = triggeredRule != null || finalUrgencyScore >= 4
         val pattern = when {
-            urgencyScore >= 5 -> GlyphPattern.URGENT
-            urgencyScore >= 4 || triggeredRule != null -> GlyphPattern.AMBER_BREATHE
+            finalUrgencyScore >= 5 -> GlyphPattern.URGENT
+            finalUrgencyScore >= 4 || triggeredRule != null -> GlyphPattern.AMBER_BREATHE
             else -> GlyphPattern.NONE
         }
+        
+        // Build enhanced raw response with semantic match info
+        val enhancedRawResponse = buildEnhancedResponse(
+            rawAiResponse = rawAiResponse,
+            aiScore = aiUrgencyScore,
+            semanticResult = semanticResult,
+            finalScore = finalUrgencyScore
+        )
 
         return DecisionResult(
             shouldLightUp = shouldLightUp,
             pattern = pattern,
-            urgencyScore = urgencyScore,
+            urgencyScore = finalUrgencyScore,
             sentiment = sentiment,
-            rawAiResponse = rawAiResponse,
-            triggeredRuleId = triggeredRule?.id
+            rawAiResponse = enhancedRawResponse,
+            triggeredRuleId = triggeredRule?.id,
+            semanticMatched = semanticResult.matched,
+            semanticCategories = semanticResult.categories,
+            semanticBoost = if (semanticResult.matched && semanticResult.highestLevel > aiUrgencyScore) 
+                semanticResult.highestLevel - aiUrgencyScore else 0
         )
+    }
+    
+    /**
+     * Build an enhanced raw response that includes semantic match information.
+     */
+    private fun buildEnhancedResponse(
+        rawAiResponse: String?,
+        aiScore: Int,
+        semanticResult: SemanticMatchResult,
+        finalScore: Int
+    ): String {
+        val sb = StringBuilder()
+        
+        // AI Response section
+        if (rawAiResponse != null) {
+            sb.appendLine("=== AI Analysis ===")
+            sb.appendLine(rawAiResponse)
+            sb.appendLine("AI Urgency Score: $aiScore")
+            sb.appendLine()
+        }
+        
+        // Semantic matching section
+        if (semanticResult.matched) {
+            sb.appendLine("=== Semantic Keywords Matched ===")
+            semanticResult.matchedKeywords.forEach { keyword ->
+                sb.appendLine("• \"${keyword.text}\" → Level ${keyword.level} (${keyword.category})")
+            }
+            sb.appendLine("Semantic Boost: ${semanticResult.highestLevel}")
+            sb.appendLine()
+        }
+        
+        // Final score
+        if (semanticResult.matched && finalScore != aiScore) {
+            sb.appendLine("=== Final Score ===")
+            sb.appendLine("Adjusted from $aiScore → $finalScore (semantic boost)")
+        }
+        
+        return if (sb.isEmpty()) rawAiResponse ?: "" else sb.toString().trim()
     }
 
     private suspend fun updateContactStats(profile: ContactProfile, senderId: String) {

@@ -5,7 +5,19 @@ import kotlinx.coroutines.flow.Flow
 
 // Consumed by Track 2 (Background Service)
 interface IntelligenceEngine {
-    suspend fun processNotification(text: String, senderId: String): DecisionResult
+    /**
+     * Process a notification through the intelligence pipeline.
+     * 
+     * @param text The notification text
+     * @param senderId The sender/app identifier
+     * @param userKeywords User-defined keywords that take priority over pre-defined semantics
+     * @return DecisionResult with urgency score, sentiment, and glyph pattern
+     */
+    suspend fun processNotification(
+        text: String, 
+        senderId: String,
+        userKeywords: List<String> = emptyList()
+    ): DecisionResult
 }
 
 // Consumed by Track 3 (UI)
@@ -22,7 +34,11 @@ data class DecisionResult(
     val sentiment: String,
     val rawAiResponse: String? = null,
     // Rule matching info
-    val triggeredRuleId: Int? = null
+    val triggeredRuleId: Int? = null,
+    // Semantic keyword matching info
+    val semanticMatched: Boolean = false,
+    val semanticCategories: Set<String> = emptySet(),
+    val semanticBoost: Int = 0 // How much the score was boosted by semantics
 )
 
 enum class GlyphPattern {
