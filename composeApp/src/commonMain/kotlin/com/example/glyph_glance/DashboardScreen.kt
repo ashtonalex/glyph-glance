@@ -75,7 +75,8 @@ data class ActivityNotification(
     val priority: NotificationPriority,
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
     val sentiment: String? = null,
-    val urgencyScore: Int? = null
+    val urgencyScore: Int? = null,
+    val rawAiResponse: String? = null // Raw AI thought process for analysis details
 )
 
 @Composable
@@ -119,6 +120,10 @@ fun DashboardScreen() {
     var finalUrgencyScore by remember { mutableStateOf<Int?>(null) }
     var rulesMatched by remember { mutableStateOf(false) }
     
+    // Notification details dialog state
+    var selectedNotification by remember { mutableStateOf<ActivityNotification?>(null) }
+    var showNotificationDetails by remember { mutableStateOf(false) }
+    
     // Helper function to format time ago
     fun formatTimeAgo(minutesAgo: Int): String {
         return when {
@@ -159,7 +164,8 @@ fun DashboardScreen() {
                     priority = dbNotif.priority,
                     icon = getIconForApp(dbNotif.appName),
                     sentiment = dbNotif.sentiment,
-                    urgencyScore = dbNotif.urgencyScore
+                    urgencyScore = dbNotif.urgencyScore,
+                    rawAiResponse = dbNotif.rawAiResponse
                 )
             })
         }
@@ -313,7 +319,8 @@ fun DashboardScreen() {
                                     priority = finalPriorityFromUrgency,
                                     icon = getIconForApp(testSender),
                                     sentiment = analysisResult?.sentiment,
-                                    urgencyScore = finalUrgencyScoreValue
+                                    urgencyScore = finalUrgencyScoreValue,
+                                    rawAiResponse = analysisResult?.rawAiResponse
                                 )
                                 
                                 // Add to the beginning of the list
@@ -559,7 +566,11 @@ fun DashboardScreen() {
                                         icon = notification.icon,
                                         sentiment = notification.sentiment,
                                         urgencyScore = notification.urgencyScore,
-                                        onDelete = deleteHandler
+                                        onDelete = deleteHandler,
+                                        onClick = {
+                                            selectedNotification = notification
+                                            showNotificationDetails = true
+                                        }
                                     )
                                 }
                                 if (index < filteredNotifications.size - 1) {
@@ -642,6 +653,22 @@ fun DashboardScreen() {
                     prefsManager.saveAppRules(appRules)
                 }
                 showAddAppDialog = false
+            }
+        )
+    }
+    
+    // Notification Details Dialog
+    if (showNotificationDetails && selectedNotification != null) {
+        NotificationDetailsDialog(
+            title = selectedNotification!!.title,
+            message = selectedNotification!!.message,
+            priority = selectedNotification!!.priority,
+            sentiment = selectedNotification!!.sentiment,
+            urgencyScore = selectedNotification!!.urgencyScore,
+            rawAiResponse = selectedNotification!!.rawAiResponse,
+            onDismiss = {
+                showNotificationDetails = false
+                selectedNotification = null
             }
         )
     }

@@ -41,7 +41,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
             AppDatabase::class.java,
             "glyph_glance_db"
         )
-        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
         .build()
         
         repository = NotificationRepositoryImpl(notificationDatabase.notificationDao())
@@ -137,7 +137,8 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     appPackage = sbn.packageName,
                     appName = appName,
                     sentiment = decision.sentiment,
-                    urgencyScore = finalUrgencyScore
+                    urgencyScore = finalUrgencyScore,
+                    rawAiResponse = decision.rawAiResponse
                 )
                 
                 // Save to database
