@@ -5,7 +5,15 @@ import com.example.glyph_glance.database.ContactDao
 import com.example.glyph_glance.database.ContactProfile
 import com.example.glyph_glance.database.Rule
 import com.example.glyph_glance.database.RuleDao
+import com.example.glyph_glance.logging.LiveLogger
 import kotlinx.datetime.Clock
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CancellationException
 
 class GlyphIntelligenceEngine(
     private val sentimentAnalysisService: SentimentAnalysisService,
@@ -14,7 +22,90 @@ class GlyphIntelligenceEngine(
     private val contactDao: ContactDao
 ) : IntelligenceEngine {
 
+    private val bufferMutex = Mutex()
+    private val messageBuffers = mutableMapOf<String, MutableList<String>>()
+    private val activeJobs = mutableMapOf<String, Job>()
+
     override suspend fun processNotification(
+        text: String, 
+        senderId: String,
+        userKeywords: List<String>
+    ): DecisionResult = coroutineScope {
+        val jobToWait = bufferMutex.withLock {
+            activeJobs[senderId]?.cancel()
+            
+            val buffer = messageBuffers.getOrPut(senderId) { mutableListOf() }
+            buffer.add(text)
+            
+            // Log actual buffer size
+            LiveLogger.logBufferQueue(
+                senderId = senderId,
+                action = "Buffered message",
+                queueSize = buffer.size
+            )
+            
+            val newJob = launch {
+                delay(5000)
+            }
+            activeJobs[senderId] = newJob
+            newJob
+        }
+
+        try {
+            jobToWait.join()
+        } catch (e: CancellationException) {
+            // Job cancelled, handled by isCancelled check
+        }
+
+        if (jobToWait.isCancelled) {
+             return@coroutineScope DecisionResult(
+                shouldLightUp = false,
+                pattern = GlyphPattern.NONE,
+                urgencyScore = 0,
+                sentiment = "NEUTRAL",
+                rawAiResponse = "Buffered (Merged into newer notification)",
+                triggeredRuleId = null,
+                semanticMatched = false,
+                semanticCategories = emptySet(),
+                semanticBoost = 0,
+                isBuffered = true
+            )
+        }
+
+        val combinedText = bufferMutex.withLock {
+            val buffer = messageBuffers[senderId] ?: return@withLock ""
+            val size = buffer.size
+            val batchText = buffer.joinToString("\n")
+            messageBuffers.remove(senderId)
+            activeJobs.remove(senderId)
+            
+            LiveLogger.logBufferQueue(
+                senderId = senderId,
+                action = "Processing batch",
+                queueSize = size
+            )
+            
+            batchText
+        }
+        
+        if (combinedText.isEmpty()) {
+             return@coroutineScope DecisionResult(
+                shouldLightUp = false,
+                pattern = GlyphPattern.NONE,
+                urgencyScore = 0,
+                sentiment = "NEUTRAL",
+                rawAiResponse = "Empty Batch",
+                triggeredRuleId = null,
+                semanticMatched = false,
+                semanticCategories = emptySet(),
+                semanticBoost = 0
+            )
+        }
+
+        processBatch(combinedText, senderId, userKeywords)
+    }
+
+    private suspend fun processBatch(
         text: String, 
         senderId: String,
         userKeywords: List<String>
@@ -27,7 +118,7 @@ class GlyphIntelligenceEngine(
         }
         
         // Update contact stats with current timestamp
-        updateContactStats(profile, senderId)
+        updateContactStats(profile)
 
         // 2. AI Analysis using SentimentAnalysisService
         val analysisResult = sentimentAnalysisService.analyzeNotification(text, senderId)
@@ -46,7 +137,7 @@ class GlyphIntelligenceEngine(
 
         // 4. Rule Matching (database rules)
         val activeRules = ruleDao.getAllRules()
-        val triggeredRule = matchRules(semanticAdjustedScore, text, senderId, activeRules)
+        val triggeredRule = matchRules(text, senderId, activeRules)
         
         // Final urgency score after all adjustments
         val finalUrgencyScore = semanticAdjustedScore
@@ -119,7 +210,7 @@ class GlyphIntelligenceEngine(
         return if (sb.isEmpty()) rawAiResponse ?: "" else sb.toString().trim()
     }
 
-    private suspend fun updateContactStats(profile: ContactProfile, senderId: String) {
+    private suspend fun updateContactStats(profile: ContactProfile) {
         // Update with current timestamp
         val newProfile = profile.copy(
             lastMessageTimestamp = Clock.System.now().toEpochMilliseconds()
@@ -127,7 +218,7 @@ class GlyphIntelligenceEngine(
         contactDao.update(newProfile)
     }
 
-    private fun matchRules(urgencyScore: Int, text: String, sender: String, rules: List<Rule>): Rule? {
+    private fun matchRules(text: String, sender: String, rules: List<Rule>): Rule? {
         // Iterate through rules and see if conditions are met
         // Return the first matching rule or null
         return rules.firstOrNull { rule ->

@@ -311,7 +311,7 @@ class SentimentAnalysisService {
             val appContext = inferAppContext(senderId)
             // Simplified prompt for faster responses - just need a number
             // Explicitly state this is a standalone request with no previous context
-            val systemPrompt = "You are an urgency evaluator. Each request is independent with no conversation history. Output ONLY a number 1-6. No explanation."
+            val systemPrompt = "You are an urgency evaluator. Each request is independent with no conversation history."
             
             val userPrompt = """
                 Rate notification urgency 1(lowest)-6(critical).

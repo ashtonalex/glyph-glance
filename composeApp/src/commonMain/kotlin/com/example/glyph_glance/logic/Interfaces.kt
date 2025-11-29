@@ -38,7 +38,8 @@ data class DecisionResult(
     // Semantic keyword matching info
     val semanticMatched: Boolean = false,
     val semanticCategories: Set<String> = emptySet(),
-    val semanticBoost: Int = 0 // How much the score was boosted by semantics
+    val semanticBoost: Int = 0, // How much the score was boosted by semantics
+    val isBuffered: Boolean = false // True if this result is from a buffered/superseded notification
 )
 
 enum class GlyphPattern {
