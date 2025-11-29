@@ -27,6 +27,9 @@ interface PreferencesManager {
     
     suspend fun saveUserProfile(profile: UserProfile)
     suspend fun getUserProfile(): UserProfile
+    
+    suspend fun saveDeveloperMode(enabled: Boolean)
+    suspend fun getDeveloperMode(): Boolean
 }
 
 /**
@@ -72,4 +75,12 @@ class InMemoryPreferencesManager : PreferencesManager {
     }
     
     override suspend fun getUserProfile(): UserProfile = userProfile
+    
+    private var developerMode = false
+    
+    override suspend fun saveDeveloperMode(enabled: Boolean) {
+        developerMode = enabled
+    }
+    
+    override suspend fun getDeveloperMode(): Boolean = developerMode
 }
