@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
@@ -58,6 +59,19 @@ fun App() {
                             indicatorColor = getThemeMediumPriority().copy(alpha = 0.1f)
                         )
                     )
+                    NavigationBarItem(
+                        selected = currentScreen == Screen.ActivityLogs,
+                        onClick = { currentScreen = Screen.ActivityLogs },
+                        icon = { Icon(Icons.Default.History, contentDescription = "Logs") },
+                        label = { Text("Logs") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = getThemeMediumPriority(),
+                            selectedTextColor = getThemeMediumPriority(),
+                            unselectedIconColor = TextGrey,
+                            unselectedTextColor = TextGrey,
+                            indicatorColor = getThemeMediumPriority().copy(alpha = 0.1f)
+                        )
+                    )
                 }
             }
         ) { innerPadding ->
@@ -68,6 +82,7 @@ fun App() {
                 when (currentScreen) {
                     Screen.Dashboard -> DashboardScreen()
                     Screen.LedConfig -> LedConfigScreen()
+                    Screen.ActivityLogs -> ActivityLogsScreen()
                 }
             }
         }
@@ -86,5 +101,6 @@ fun ThemeBackgroundGradient() {
 
 enum class Screen {
     Dashboard,
-    LedConfig
+    LedConfig,
+    ActivityLogs
 }

@@ -4,6 +4,9 @@ import com.cactus.CactusLM
 import com.cactus.ChatMessage
 import com.cactus.CactusCompletionParams
 import com.cactus.CactusInitParams
+import com.example.glyph_glance.logging.LiveLogger
+import com.example.glyph_glance.logging.LogStatus
+import com.example.glyph_glance.logging.LogType
 import kotlinx.serialization.Serializable
 
 /**
@@ -23,24 +26,52 @@ data class AnalysisResult(
 class SentimentAnalysisService {
     
     private var cactusLM: CactusLM? = null
-    private var isInitialized = false
+    private var _isInitialized = false
+    private var _isModelDownloaded = false
+    
+    /** Whether Cactus LM is initialized and ready */
+    val isInitialized: Boolean get() = _isInitialized
+    
+    /** Whether the model has been downloaded */
+    val isModelDownloaded: Boolean get() = _isModelDownloaded
     
     /**
      * Initialize the Cactus LM with Qwen model
      * Should be called once before using the service
      */
     suspend fun initialize(): Boolean {
-        if (isInitialized) return true
+        if (_isInitialized) return true
+        
+        LiveLogger.addLog(
+            type = LogType.CACTUS_INIT,
+            message = "Starting Cactus LM initialization...",
+            status = LogStatus.PENDING
+        )
         
         return try {
             val lm = CactusLM()
             
             // Download and initialize Qwen3-0.6B model
             println("SentimentAnalysisService: Downloading Qwen3-0.6 model...")
+            LiveLogger.addLog(
+                type = LogType.MODEL_DOWNLOAD,
+                message = "Downloading Qwen3-0.6 model...",
+                status = LogStatus.PENDING
+            )
+            
             val downloadResult = lm.downloadModel("qwen3-0.6")
             println("SentimentAnalysisService: Download result: $downloadResult")
             
+            _isModelDownloaded = true
+            LiveLogger.setModelDownloaded(true)
+            
             println("SentimentAnalysisService: Initializing Qwen3-0.6 model...")
+            LiveLogger.addLog(
+                type = LogType.CACTUS_INIT,
+                message = "Initializing Qwen3-0.6 model...",
+                status = LogStatus.PENDING
+            )
+            
             val initResult = lm.initializeModel(
                 CactusInitParams(
                     model = "qwen3-0.6",
@@ -50,12 +81,15 @@ class SentimentAnalysisService {
             println("SentimentAnalysisService: Initialization result: $initResult")
             
             cactusLM = lm
-            isInitialized = true
+            _isInitialized = true
+            LiveLogger.setCactusInitialized(true)
+            
             println("SentimentAnalysisService: Qwen3 model initialized successfully")
             true
         } catch (e: Exception) {
             println("SentimentAnalysisService: Error initializing Cactus LM: ${e.message}")
             e.printStackTrace()
+            LiveLogger.logError("Cactus Initialization", e.message ?: "Unknown error")
             false
         }
     }
@@ -71,7 +105,7 @@ class SentimentAnalysisService {
         content: String,
         senderId: String
     ): AnalysisResult? {
-        if (!isInitialized) {
+        if (!_isInitialized) {
             val initSuccess = initialize()
             if (!initSuccess) {
                 return getDefaultResult()
@@ -79,6 +113,8 @@ class SentimentAnalysisService {
         }
         
         val lm = cactusLM ?: return getDefaultResult()
+        
+        val startTime = System.currentTimeMillis()
         
         return try {
             val appContext = inferAppContext(senderId)
@@ -138,15 +174,28 @@ class SentimentAnalysisService {
             val responseText = result?.response
             println("SentimentAnalysisService: Qwen3 response - Success: ${result?.success}, Response: '$responseText'")
             
+            val processingTime = System.currentTimeMillis() - startTime
+            
             if (result?.success == true && responseText != null && responseText.isNotEmpty()) {
-                parseUrgencyScore(responseText, responseText) // Pass raw response for debugging
+                val analysisResult = parseUrgencyScore(responseText, responseText) // Pass raw response for debugging
+                
+                // Log the AI response
+                LiveLogger.logAIResponse(
+                    urgencyScore = analysisResult.urgencyScore,
+                    sentiment = analysisResult.sentiment,
+                    processingTime = processingTime
+                )
+                
+                analysisResult
             } else {
                 println("SentimentAnalysisService: Failed to get analysis result from Cactus")
+                LiveLogger.logError("AI Analysis", "Failed to get analysis result from Cactus")
                 getDefaultResult()
             }
         } catch (e: Exception) {
             println("Error analyzing notification: ${e.message}")
             e.printStackTrace()
+            LiveLogger.logError("AI Analysis", e.message ?: "Unknown error")
             getDefaultResult()
         }
     }
@@ -297,7 +346,10 @@ class SentimentAnalysisService {
     fun unload() {
         cactusLM?.unload()
         cactusLM = null
-        isInitialized = false
+        _isInitialized = false
+        _isModelDownloaded = false
+        LiveLogger.setCactusInitialized(false)
+        LiveLogger.setModelDownloaded(false)
     }
 }
 

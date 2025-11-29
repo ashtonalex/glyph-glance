@@ -14,6 +14,7 @@ import com.example.glyph_glance.di.AppModule
 import com.example.glyph_glance.logic.GlyphIntelligenceEngine
 import com.example.glyph_glance.logic.GlyphPattern
 import com.example.glyph_glance.logic.calculatePriority
+import com.example.glyph_glance.logging.LiveLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,6 +47,10 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         repository = NotificationRepositoryImpl(notificationDatabase.notificationDao())
         preferencesManager = AndroidPreferencesManager(applicationContext)
         
+        // Log service start
+        LiveLogger.setServiceRunning(true)
+        LiveLogger.setNotificationAccessEnabled(true)
+        
         Log.d(TAG, "Notification Listener Service Created with GlyphIntelligenceEngine")
     }
     
@@ -68,6 +73,13 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         // Ignore empty notifications
         if (title.isEmpty() && message.isEmpty()) return
         
+        // Log notification received
+        LiveLogger.logNotificationReceived(
+            appName = appName,
+            title = title,
+            preview = message
+        )
+        
         // Determine base priority based on notification importance
         val importance = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             sbn.notification.priority
@@ -76,6 +88,13 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         }
         
         val basePriority = NotificationPriority.fromImportance(importance)
+        
+        // Log buffer queue activity
+        LiveLogger.logBufferQueue(
+            senderId = appName,
+            action = "Added to processing queue",
+            queueSize = 1
+        )
         
         // Process notification through GlyphIntelligenceEngine
         serviceScope.launch {
@@ -129,9 +148,13 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 // Handle glyph pattern if needed
                 if (decision.shouldLightUp) {
                     handleGlyphPattern(decision.pattern)
+                } else {
+                    LiveLogger.logGlyphInteraction(decision.pattern.name, false)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing notification", e)
+                LiveLogger.logError("NotificationListener", e.message ?: "Error processing notification")
+                
                 // Save with fallback priority if processing fails
                 try {
                     val keywordRules = preferencesManager.getKeywordRules()
@@ -162,12 +185,16 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     repository.insertNotification(notificationModel)
                 } catch (saveError: Exception) {
                     Log.e(TAG, "Error saving notification", saveError)
+                    LiveLogger.logError("NotificationListener", saveError.message ?: "Error saving notification")
                 }
             }
         }
     }
     
     private fun handleGlyphPattern(pattern: GlyphPattern) {
+        // Log glyph interaction
+        LiveLogger.logGlyphInteraction(pattern.name, pattern != GlyphPattern.NONE)
+        
         // TODO: Implement actual glyph light control based on pattern
         when (pattern) {
             GlyphPattern.URGENT -> {
@@ -192,6 +219,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     override fun onDestroy() {
         super.onDestroy()
         notificationDatabase.close()
+        
+        // Log service stop
+        LiveLogger.setServiceRunning(false)
     }
     
     companion object {
