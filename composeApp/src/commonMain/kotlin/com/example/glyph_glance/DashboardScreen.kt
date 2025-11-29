@@ -26,8 +26,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -40,6 +43,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.glyph_glance.data.models.AppRule
 import com.example.glyph_glance.data.models.KeywordRule
@@ -47,8 +51,10 @@ import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.models.UserProfile
 import com.example.glyph_glance.data.models.Notification as DbNotification
 import com.example.glyph_glance.logic.AnalysisResult
+import com.example.glyph_glance.logic.SemanticMatcher
 import com.example.glyph_glance.logic.SentimentAnalysisService
 import com.example.glyph_glance.logic.calculatePriority
+import com.example.glyph_glance.logic.getSemanticKeywordsJson
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -108,6 +114,8 @@ fun DashboardScreen() {
     
     // Sentiment Analysis Test state
     val sentimentAnalysisService = remember { SentimentAnalysisService() }
+    val semanticMatcher = remember { SemanticMatcher() }
+    var semanticsLoaded by remember { mutableStateOf(false) }
     var testExpanded by remember { mutableStateOf(false) }
     var testInput by remember { mutableStateOf("") }
     var testSender by remember { mutableStateOf("Test App") }
@@ -119,6 +127,12 @@ fun DashboardScreen() {
     var showRawAiResponse by remember { mutableStateOf(false) }
     var finalUrgencyScore by remember { mutableStateOf<Int?>(null) }
     var rulesMatched by remember { mutableStateOf(false) }
+    
+    // Burst testing state
+    var burstCount by remember { mutableStateOf(5) }
+    var burstDelayMs by remember { mutableStateOf(100) }
+    var isBurstTesting by remember { mutableStateOf(false) }
+    var burstProgress by remember { mutableStateOf(0) }
     
     // Notification details dialog state
     var selectedNotification by remember { mutableStateOf<ActivityNotification?>(null) }
@@ -210,6 +224,18 @@ fun DashboardScreen() {
         keywords = prefsManager.getKeywordRules()
         appRules = prefsManager.getAppRules()
         developerMode = prefsManager.getDeveloperMode()
+    }
+    
+    // Load semantic keywords from embedded JSON
+    LaunchedEffect(Unit) {
+        try {
+            val jsonString = getSemanticKeywordsJson()
+            semanticsLoaded = semanticMatcher.loadFromJson(jsonString)
+            println("DashboardScreen: Semantic keywords loaded: $semanticsLoaded")
+        } catch (e: Exception) {
+            println("DashboardScreen: Error loading semantic keywords: ${e.message}")
+            e.printStackTrace()
+        }
     }
     
     // Filter and sort notifications
@@ -310,7 +336,32 @@ fun DashboardScreen() {
                                     rule.isIgnored && rule.appName.equals(testSender, ignoreCase = true)
                                 }
                                 
+                                // Step 2: Check semantic and user keywords BEFORE AI
+                                // If urgency 6 is found, skip AI processing entirely
+                                val userKeywords = keywordRules.map { it.keyword }
+                                val semanticResult = semanticMatcher.match(testInput, userKeywords)
+                                
+                                // Calculate priority based on user keyword rules
+                                val basePriority = NotificationPriority.MEDIUM
+                                val ruleBasedPriority = calculatePriority(
+                                    text = testInput,
+                                    appPackage = "com.test.${testSender.lowercase().replace(" ", "")}",
+                                    appName = testSender,
+                                    keywordRules = keywordRules,
+                                    appRules = appRules,
+                                    basePriority = basePriority
+                                )
+                                val rulesMatchedValue = ruleBasedPriority != basePriority
+                                rulesMatched = rulesMatchedValue
+                                val ruleBasedUrgencyScore = if (rulesMatchedValue) ruleBasedPriority.toUrgencyScore() else 0
+                                val semanticUrgencyScore = if (semanticResult.matched) semanticResult.highestLevel else 0
+                                
+                                // Check if we have max urgency (6) from keywords/semantics - skip AI if so
+                                val keywordMaxUrgency = maxOf(ruleBasedUrgencyScore, semanticUrgencyScore)
+                                val skipAiProcessing = isAppIgnored || keywordMaxUrgency >= 6
+                                
                                 val analysisResult: AnalysisResult?
+                                val aiUrgencyScore: Int
                                 
                                 if (isAppIgnored) {
                                     // Skip AI analysis for ignored apps
@@ -320,49 +371,79 @@ fun DashboardScreen() {
                                         triggeredRuleId = null,
                                         rawAiResponse = "[App Ignored - AI analysis skipped]"
                                     )
+                                    aiUrgencyScore = 1
+                                } else if (keywordMaxUrgency >= 6) {
+                                    // Skip AI for max urgency keywords - instant priority
+                                    analysisResult = AnalysisResult(
+                                        urgencyScore = 6,
+                                        sentiment = "URGENT",
+                                        triggeredRuleId = null,
+                                        rawAiResponse = "[Urgency 6 keyword detected - AI analysis skipped for instant priority]"
+                                    )
+                                    aiUrgencyScore = 6
                                 } else {
-                                    // Step 2: Perform sentiment analysis (only for non-ignored apps)
+                                    // Perform AI sentiment analysis
                                     analysisResult = sentimentAnalysisService.analyzeNotification(
                                         content = testInput,
                                         senderId = testSender
                                     )
+                                    aiUrgencyScore = analysisResult?.urgencyScore ?: 3
                                 }
-                                testResult = analysisResult
                                 
-                                // Step 3: Calculate priority based on rules
-                                // Pass both package name and app name so app rules can match by either
-                                val ruleBasedPriority = calculatePriority(
-                                    text = testInput,
-                                    appPackage = "com.test.${testSender.lowercase().replace(" ", "")}",
-                                    appName = testSender,
-                                    keywordRules = keywordRules,
-                                    appRules = appRules,
-                                    basePriority = NotificationPriority.MEDIUM // Default base priority for tests
-                                )
-                                
-                                // Step 4: Determine final urgency score and priority
-                                val basePriority = NotificationPriority.MEDIUM // Default base priority for tests
-                                val aiUrgencyScore = analysisResult?.urgencyScore ?: 3
-                                val rulesMatchedValue = ruleBasedPriority != basePriority
-                                rulesMatched = rulesMatchedValue
-                                
+                                // Determine final urgency score
                                 val finalUrgencyScoreValue = if (isAppIgnored) {
-                                    // Ignored apps always get urgency 1
                                     1
-                                } else if (rulesMatchedValue) {
-                                    // If rules matched, use the maximum of AI score and rule-based score
-                                    // This ensures AI score is never lowered, but rules can increase it
-                                    val ruleBasedUrgencyScore = ruleBasedPriority.toUrgencyScore()
-                                    maxOf(aiUrgencyScore, ruleBasedUrgencyScore)
                                 } else {
-                                    // If no rules matched, use AI urgency score directly
-                                    aiUrgencyScore
+                                    // Take maximum of: AI score, rule-based score, and semantic keyword score
+                                    maxOf(aiUrgencyScore, ruleBasedUrgencyScore, semanticUrgencyScore)
                                 }
                                 finalUrgencyScore = finalUrgencyScoreValue
                                 
                                 // Final priority should match the final urgency score
                                 val finalPriorityFromUrgency = NotificationPriority.fromUrgencyScore(finalUrgencyScoreValue)
                                 calculatedPriority = finalPriorityFromUrgency
+                                
+                                // Build enhanced raw response with semantic info
+                                val enhancedRawResponse = buildString {
+                                    // AI Response (or skip message)
+                                    analysisResult?.rawAiResponse?.let { 
+                                        appendLine("=== AI Analysis ===")
+                                        appendLine(it)
+                                        if (!skipAiProcessing) {
+                                            appendLine("AI Urgency Score: $aiUrgencyScore")
+                                        }
+                                        appendLine()
+                                    }
+                                    
+                                    // Semantic matches
+                                    if (semanticResult.matched) {
+                                        appendLine("=== Semantic Keywords Matched ===")
+                                        semanticResult.matchedKeywords.forEach { keyword ->
+                                            appendLine("• \"${keyword.text}\" → Level ${keyword.level} (${keyword.category})")
+                                        }
+                                        appendLine("Semantic Highest Level: ${semanticResult.highestLevel}")
+                                        appendLine()
+                                    }
+                                    
+                                    // Final score summary
+                                    if (!isAppIgnored && (semanticResult.matched || rulesMatchedValue)) {
+                                        appendLine("=== Final Score ===")
+                                        if (skipAiProcessing && keywordMaxUrgency >= 6) {
+                                            appendLine("⚡ Instant Priority: Level 6 keyword detected, AI skipped")
+                                        }
+                                        appendLine("AI: ${if (skipAiProcessing) "skipped" else aiUrgencyScore}, Rules: ${if (rulesMatchedValue) ruleBasedUrgencyScore else "N/A"}, Semantic: ${if (semanticResult.matched) semanticUrgencyScore else "N/A"}")
+                                        appendLine("Final (max of all): $finalUrgencyScoreValue")
+                                    }
+                                }
+                                
+                                // Update testResult with enhanced response for display
+                                val enhancedAnalysisResult = AnalysisResult(
+                                    urgencyScore = finalUrgencyScoreValue,
+                                    sentiment = analysisResult?.sentiment ?: "NEUTRAL",
+                                    triggeredRuleId = analysisResult?.triggeredRuleId,
+                                    rawAiResponse = if (enhancedRawResponse.isNotBlank()) enhancedRawResponse.trim() else analysisResult?.rawAiResponse
+                                )
+                                testResult = enhancedAnalysisResult
                                 
                                 val testNotification = ActivityNotification(
                                     id = 0, // Test notifications don't have database IDs
@@ -374,7 +455,7 @@ fun DashboardScreen() {
                                     icon = getIconForApp(testSender),
                                     sentiment = analysisResult?.sentiment,
                                     urgencyScore = finalUrgencyScoreValue,
-                                    rawAiResponse = analysisResult?.rawAiResponse
+                                    rawAiResponse = enhancedAnalysisResult.rawAiResponse
                                 )
                                 
                                 // Add to the beginning of the list
@@ -386,6 +467,114 @@ fun DashboardScreen() {
                                 testError = e.message ?: "Unknown error occurred"
                             } finally {
                                 isAnalyzing = false
+                            }
+                        }
+                    },
+                    // Burst testing parameters
+                    burstCount = burstCount,
+                    onBurstCountChange = { burstCount = it },
+                    burstDelayMs = burstDelayMs,
+                    onBurstDelayChange = { burstDelayMs = it },
+                    isBurstTesting = isBurstTesting,
+                    burstProgress = burstProgress,
+                    onBurstTest = {
+                        coroutineScope.launch {
+                            isBurstTesting = true
+                            burstProgress = 0
+                            testError = null
+                            
+                            try {
+                                val keywordRules = prefsManager.getKeywordRules()
+                                val appRulesLocal = prefsManager.getAppRules()
+                                
+                                for (i in 1..burstCount) {
+                                    burstProgress = i
+                                    
+                                    // Check if this app is ignored
+                                    val isAppIgnored = appRulesLocal.any { rule ->
+                                        rule.isIgnored && rule.appName.equals(testSender, ignoreCase = true)
+                                    }
+                                    
+                                    // Check semantic and user keywords
+                                    val userKeywords = keywordRules.map { it.keyword }
+                                    val semanticResult = semanticMatcher.match(testInput, userKeywords)
+                                    
+                                    // Calculate priority based on user keyword rules
+                                    val basePriority = NotificationPriority.MEDIUM
+                                    val ruleBasedPriority = calculatePriority(
+                                        text = testInput,
+                                        appPackage = "com.test.${testSender.lowercase().replace(" ", "")}",
+                                        appName = testSender,
+                                        keywordRules = keywordRules,
+                                        appRules = appRulesLocal,
+                                        basePriority = basePriority
+                                    )
+                                    val rulesMatchedValue = ruleBasedPriority != basePriority
+                                    val ruleBasedUrgencyScore = if (rulesMatchedValue) ruleBasedPriority.toUrgencyScore() else 0
+                                    val semanticUrgencyScore = if (semanticResult.matched) semanticResult.highestLevel else 0
+                                    val keywordMaxUrgency = maxOf(ruleBasedUrgencyScore, semanticUrgencyScore)
+                                    
+                                    val analysisResult: AnalysisResult?
+                                    val aiUrgencyScore: Int
+                                    
+                                    if (isAppIgnored) {
+                                        analysisResult = AnalysisResult(
+                                            urgencyScore = 1,
+                                            sentiment = "NEUTRAL",
+                                            triggeredRuleId = null,
+                                            rawAiResponse = "[App Ignored - AI skipped]"
+                                        )
+                                        aiUrgencyScore = 1
+                                    } else if (keywordMaxUrgency >= 6) {
+                                        analysisResult = AnalysisResult(
+                                            urgencyScore = 6,
+                                            sentiment = "URGENT",
+                                            triggeredRuleId = null,
+                                            rawAiResponse = "[Urgency 6 keyword - instant priority]"
+                                        )
+                                        aiUrgencyScore = 6
+                                    } else {
+                                        analysisResult = sentimentAnalysisService.analyzeNotification(
+                                            content = testInput,
+                                            senderId = testSender
+                                        )
+                                        aiUrgencyScore = analysisResult?.urgencyScore ?: 3
+                                    }
+                                    
+                                    val finalUrgencyScoreValue = if (isAppIgnored) {
+                                        1
+                                    } else {
+                                        maxOf(aiUrgencyScore, ruleBasedUrgencyScore, semanticUrgencyScore)
+                                    }
+                                    val finalPriorityFromUrgency = NotificationPriority.fromUrgencyScore(finalUrgencyScoreValue)
+                                    
+                                    val burstNotification = ActivityNotification(
+                                        id = 0,
+                                        title = "Burst #$i: $testSender",
+                                        message = testInput,
+                                        time = "Just now",
+                                        minutesAgo = 0,
+                                        priority = finalPriorityFromUrgency,
+                                        icon = getIconForApp(testSender),
+                                        sentiment = analysisResult?.sentiment,
+                                        urgencyScore = finalUrgencyScoreValue,
+                                        rawAiResponse = analysisResult?.rawAiResponse
+                                    )
+                                    
+                                    allNotifications.add(0, burstNotification)
+                                    
+                                    // Delay between notifications (except for the last one)
+                                    if (i < burstCount) {
+                                        kotlinx.coroutines.delay(burstDelayMs.toLong())
+                                    }
+                                }
+                                
+                                testSuccess = true
+                            } catch (e: Exception) {
+                                testError = "Burst test failed: ${e.message}"
+                            } finally {
+                                isBurstTesting = false
+                                burstProgress = 0
                             }
                         }
                     }
@@ -615,40 +804,40 @@ fun DashboardScreen() {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
-                                .padding(bottom = 16.dp)
+                                .padding(bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            filteredNotifications.forEachIndexed { index, notification ->
-                                val importanceColor = when (notification.priority) {
-                                    NotificationPriority.HIGH -> themeColors.highPriority
-                                    NotificationPriority.MEDIUM -> themeColors.mediumPriority
-                                    NotificationPriority.LOW -> themeColors.lowPriority
-                                }
-                                AnimatedDeleteWrapper(
-                                    onDelete = {
-                                        if (notification.id > 0 && notificationRepository != null) {
-                                            coroutineScope.launch {
-                                                notificationRepository.deleteNotification(notification.id)
+                            filteredNotifications.forEach { notification ->
+                                key(notification.id) {
+                                    val importanceColor = when (notification.priority) {
+                                        NotificationPriority.HIGH -> themeColors.highPriority
+                                        NotificationPriority.MEDIUM -> themeColors.mediumPriority
+                                        NotificationPriority.LOW -> themeColors.lowPriority
+                                    }
+                                    AnimatedDeleteWrapper(
+                                        onDelete = {
+                                            if (notification.id > 0 && notificationRepository != null) {
+                                                coroutineScope.launch {
+                                                    notificationRepository.deleteNotification(notification.id)
+                                                }
                                             }
                                         }
+                                    ) { deleteHandler ->
+                                        NotificationItem(
+                                            title = notification.title,
+                                            message = notification.message,
+                                            time = notification.time,
+                                            importanceColor = importanceColor,
+                                            icon = notification.icon,
+                                            sentiment = notification.sentiment,
+                                            urgencyScore = notification.urgencyScore,
+                                            onDelete = deleteHandler,
+                                            onClick = {
+                                                selectedNotification = notification
+                                                showNotificationDetails = true
+                                            }
+                                        )
                                     }
-                                ) { deleteHandler ->
-                                    NotificationItem(
-                                        title = notification.title,
-                                        message = notification.message,
-                                        time = notification.time,
-                                        importanceColor = importanceColor,
-                                        icon = notification.icon,
-                                        sentiment = notification.sentiment,
-                                        urgencyScore = notification.urgencyScore,
-                                        onDelete = deleteHandler,
-                                        onClick = {
-                                            selectedNotification = notification
-                                            showNotificationDetails = true
-                                        }
-                                    )
-                                }
-                                if (index < filteredNotifications.size - 1) {
-                                    Spacer(modifier = Modifier.height(8.dp))
                                 }
                             }
                         }
@@ -1067,34 +1256,30 @@ private fun AnimatedDeleteWrapper(
     var isVisible by remember { mutableStateOf(true) }
     val coroutineScope = rememberCoroutineScope()
     
-    val transition = updateTransition(targetState = isVisible, label = "delete")
-    val alpha by transition.animateFloat(
-        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
-        label = "alpha"
-    ) { if (it) 1f else 0f }
-    val scale by transition.animateFloat(
-        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
-        label = "scale"
-    ) { if (it) 1f else 0.7f }
-    val offsetX by transition.animateDp(
-        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
-        label = "offsetX"
-    ) { if (it) 0.dp else (-400).dp }
-    
-    Box(
-        modifier = Modifier
-            .alpha(alpha)
-            .scale(scale)
-            .offset(x = offsetX)
+    // Use AnimatedVisibility for smooth height collapse
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = EnterTransition.None,
+        exit = shrinkVertically(
+            animationSpec = tween(250, easing = FastOutSlowInEasing),
+            shrinkTowards = Alignment.Top
+        ) + fadeOut(
+            animationSpec = tween(200, easing = FastOutSlowInEasing)
+        ) + slideOutHorizontally(
+            animationSpec = tween(250, easing = FastOutSlowInEasing),
+            targetOffsetX = { -it }
+        )
     ) {
-        val deleteHandler: () -> Unit = {
-            isVisible = false
-            coroutineScope.launch {
-                kotlinx.coroutines.delay(300) // Wait for animation to complete
-                onDelete()
+        Box {
+            val deleteHandler: () -> Unit = {
+                isVisible = false
+                coroutineScope.launch {
+                    kotlinx.coroutines.delay(300) // Wait for animation to complete
+                    onDelete()
+                }
             }
+            content(deleteHandler)
         }
-        content(deleteHandler)
     }
 }
 
@@ -1180,7 +1365,8 @@ fun KeywordsSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (keywords.isEmpty()) {
                         Text(
@@ -1190,17 +1376,16 @@ fun KeywordsSection(
                             modifier = Modifier.padding(vertical = 16.dp)
                         )
                     } else {
-                        keywords.forEachIndexed { index, rule ->
-                            AnimatedDeleteWrapper(
-                                onDelete = { onDelete(rule) }
-                            ) { deleteHandler ->
-                                KeywordRuleItem(
-                                    rule = rule,
-                                    onDelete = deleteHandler
-                                )
-                            }
-                            if (index < keywords.size - 1) {
-                                Spacer(modifier = Modifier.height(8.dp))
+                        keywords.forEach { rule ->
+                            key(rule.keyword) {
+                                AnimatedDeleteWrapper(
+                                    onDelete = { onDelete(rule) }
+                                ) { deleteHandler ->
+                                    KeywordRuleItem(
+                                        rule = rule,
+                                        onDelete = deleteHandler
+                                    )
+                                }
                             }
                         }
                     }
@@ -1292,7 +1477,8 @@ fun AppsSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (appRules.isEmpty()) {
                         Text(
@@ -1302,17 +1488,16 @@ fun AppsSection(
                             modifier = Modifier.padding(vertical = 16.dp)
                         )
                     } else {
-                        appRules.forEachIndexed { index, rule ->
-                            AnimatedDeleteWrapper(
-                                onDelete = { onDelete(rule) }
-                            ) { deleteHandler ->
-                                AppRuleItem(
-                                    rule = rule,
-                                    onDelete = deleteHandler
-                                )
-                            }
-                            if (index < appRules.size - 1) {
-                                Spacer(modifier = Modifier.height(8.dp))
+                        appRules.forEach { rule ->
+                            key(rule.packageName) {
+                                AnimatedDeleteWrapper(
+                                    onDelete = { onDelete(rule) }
+                                ) { deleteHandler ->
+                                    AppRuleItem(
+                                        rule = rule,
+                                        onDelete = deleteHandler
+                                    )
+                                }
                             }
                         }
                     }
@@ -1609,7 +1794,15 @@ fun SentimentTestSection(
     showRawAiResponse: Boolean,
     onShowRawAiResponseChange: (Boolean) -> Unit,
     finalUrgencyScore: Int?,
-    onAnalyze: () -> Unit
+    onAnalyze: () -> Unit,
+    // Burst testing parameters
+    burstCount: Int,
+    onBurstCountChange: (Int) -> Unit,
+    burstDelayMs: Int,
+    onBurstDelayChange: (Int) -> Unit,
+    isBurstTesting: Boolean,
+    burstProgress: Int,
+    onBurstTest: () -> Unit
 ) {
     val themeColors = LocalThemeColors.current
     
@@ -1730,6 +1923,157 @@ fun SentimentTestSection(
                             Text("Analyzing...")
                         } else {
                             Text("Analyze with AI")
+                        }
+                    }
+                    
+                    // Burst Testing Section
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                SurfaceDarkGrey.copy(alpha = 0.4f),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .border(
+                                1.dp,
+                                Color.White.copy(alpha = 0.08f),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "⚡ Rapid Fire Test",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold
+                        )
+                        
+                        Text(
+                            text = "Send multiple notifications in quick succession",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextGrey
+                        )
+                        
+                        // Count control
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Count:",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextWhite
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { if (burstCount > 2) onBurstCountChange(burstCount - 1) },
+                                    enabled = !isBurstTesting && burstCount > 2,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Decrease",
+                                        tint = if (burstCount > 2) TextWhite else TextGrey
+                                    )
+                                }
+                                Text(
+                                    text = "$burstCount",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = getThemeMediumPriority(),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(40.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                                IconButton(
+                                    onClick = { if (burstCount < 20) onBurstCountChange(burstCount + 1) },
+                                    enabled = !isBurstTesting && burstCount < 20,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.KeyboardArrowUp,
+                                        contentDescription = "Increase",
+                                        tint = if (burstCount < 20) TextWhite else TextGrey
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // Delay control
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Delay:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextWhite
+                                )
+                                Text(
+                                    text = "${burstDelayMs}ms",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = getThemeMediumPriority(),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Slider(
+                                value = burstDelayMs.toFloat(),
+                                onValueChange = { onBurstDelayChange(it.toInt()) },
+                                valueRange = 50f..1000f,
+                                steps = 18, // 50ms increments roughly
+                                enabled = !isBurstTesting,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = getThemeMediumPriority(),
+                                    activeTrackColor = getThemeMediumPriority(),
+                                    inactiveTrackColor = TextGrey.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("50ms", style = MaterialTheme.typography.labelSmall, color = TextGrey)
+                                Text("1000ms", style = MaterialTheme.typography.labelSmall, color = TextGrey)
+                            }
+                        }
+                        
+                        // Burst Test Button
+                        Button(
+                            onClick = onBurstTest,
+                            enabled = !isBurstTesting && !isAnalyzing && testInput.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = themeColors.highPriority,
+                                contentColor = TextWhite,
+                                disabledContainerColor = TextGrey.copy(alpha = 0.3f),
+                                disabledContentColor = TextGrey
+                            )
+                        ) {
+                            if (isBurstTesting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = TextWhite,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Sending $burstProgress / $burstCount...")
+                            } else {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("🚀 Rapid Fire ($burstCount × ${burstDelayMs}ms)")
+                            }
                         }
                     }
                     
@@ -1896,7 +2240,7 @@ fun SentimentTestSection(
                                             Row(
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
-                                                repeat(5) { index ->
+                                                repeat(6) { index ->
                                                     Box(
                                                         modifier = Modifier
                                                             .size(8.dp)

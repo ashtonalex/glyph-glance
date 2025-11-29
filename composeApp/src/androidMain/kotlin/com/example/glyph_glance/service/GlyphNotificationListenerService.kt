@@ -12,6 +12,7 @@ import com.example.glyph_glance.data.preferences.AndroidPreferencesManager
 import com.example.glyph_glance.data.repository.NotificationRepositoryImpl
 import com.example.glyph_glance.di.AppModule
 import com.example.glyph_glance.logic.GlyphIntelligenceEngine
+import com.example.glyph_glance.logic.DecisionResult
 import com.example.glyph_glance.logic.GlyphPattern
 import com.example.glyph_glance.logic.calculatePriority
 import com.example.glyph_glance.logging.LiveLogger
@@ -146,6 +147,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 // User keywords take priority over pre-defined semantics
                 val userKeywords = keywordRules.map { it.keyword }
                 
+
                 // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
                 // This will wait for the 5-second buffering window
                 val decision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
@@ -170,11 +172,43 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     appRules = appRules,
                     basePriority = basePriority
                 )
-                
-                // Combine AI urgency with preference rules (take maximum)
                 val preferenceUrgencyScore = preferencePriority.toUrgencyScore()
-                val finalUrgencyScore = maxOf(decision.urgencyScore, preferenceUrgencyScore)
-                val finalPriority = NotificationPriority.fromUrgencyScore(finalUrgencyScore)
+                
+                // If user keyword rules give urgency 6, skip AI for instant priority
+                val finalUrgencyScore: Int
+                val finalPriority: NotificationPriority
+                val decision: DecisionResult
+                
+                if (preferenceUrgencyScore >= 6) {
+                    // Instant priority - skip AI processing
+                    Log.d(TAG, "Urgency 6 keyword detected: $appName - skipping AI for instant priority")
+                    LiveLogger.addLog(
+                        type = com.example.glyph_glance.logging.LogType.AI_RESPONSE,
+                        message = "⚡ Instant Priority: $appName (urgency → 6, AI skipped)",
+                        status = com.example.glyph_glance.logging.LogStatus.INFO
+                    )
+                    
+                    finalUrgencyScore = 6
+                    finalPriority = NotificationPriority.HIGH
+                    decision = DecisionResult(
+                        shouldLightUp = true,
+                        pattern = GlyphPattern.URGENT,
+                        urgencyScore = 6,
+                        sentiment = "URGENT",
+                        rawAiResponse = "[Urgency 6 keyword detected - AI analysis skipped for instant priority]",
+                        triggeredRuleId = null,
+                        semanticMatched = false,
+                        semanticCategories = emptySet(),
+                        semanticBoost = 0
+                    )
+                } else {
+                    // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
+                    decision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
+                    
+                    // Combine AI urgency with preference rules (take maximum)
+                    finalUrgencyScore = maxOf(decision.urgencyScore, preferenceUrgencyScore)
+                    finalPriority = NotificationPriority.fromUrgencyScore(finalUrgencyScore)
+                }
                 
                 val notificationModel = com.example.glyph_glance.data.models.Notification(
                     title = title,
