@@ -9,6 +9,7 @@ import androidx.room.Room
 import com.example.glyph_glance.data.database.AppDatabase
 import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.repository.NotificationRepositoryImpl
+import com.example.glyph_glance.logic.SentimentAnalysisService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +20,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var database: AppDatabase
     private lateinit var repository: NotificationRepositoryImpl
+    private val sentimentAnalysisService = SentimentAnalysisService()
     
     override fun onCreate() {
         super.onCreate()
@@ -26,9 +28,26 @@ class GlyphNotificationListenerService : NotificationListenerService() {
             applicationContext,
             AppDatabase::class.java,
             "glyph_glance_db"
-        ).build()
+        )
+        .addMigrations(AppDatabase.MIGRATION_1_2)
+        .build()
         
         repository = NotificationRepositoryImpl(database.notificationDao())
+        
+        // Initialize sentiment analysis service in background
+        serviceScope.launch {
+            try {
+                val initialized = sentimentAnalysisService.initialize()
+                if (initialized) {
+                    Log.d(TAG, "Sentiment analysis service initialized successfully")
+                } else {
+                    Log.w(TAG, "Failed to initialize sentiment analysis service")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error initializing sentiment analysis service", e)
+            }
+        }
+        
         Log.d(TAG, "Notification Listener Service Created")
     }
     
@@ -60,8 +79,8 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         
         val priority = NotificationPriority.fromImportance(importance)
         
-        // Create notification model
-        val notificationModel = com.example.glyph_glance.data.models.Notification(
+        // Create notification model (initially without sentiment)
+        var notificationModel = com.example.glyph_glance.data.models.Notification(
             title = title,
             message = message,
             timestamp = sbn.postTime,
@@ -70,13 +89,40 @@ class GlyphNotificationListenerService : NotificationListenerService() {
             appName = appName
         )
         
-        // Save to database
+        // Process notification: analyze sentiment and save to database
         serviceScope.launch {
             try {
+                // Perform sentiment analysis
+                val fullText = if (title.isNotEmpty() && message.isNotEmpty()) {
+                    "$title: $message"
+                } else {
+                    title.ifEmpty { message }
+                }
+                
+                val analysisResult = sentimentAnalysisService.analyzeNotification(
+                    content = fullText,
+                    senderId = appName
+                )
+                
+                // Update notification model with sentiment analysis results
+                notificationModel = notificationModel.copy(
+                    sentiment = analysisResult?.sentiment,
+                    urgencyScore = analysisResult?.urgencyScore
+                )
+                
+                // Save to database
                 repository.insertNotification(notificationModel)
-                Log.d(TAG, "Saved notification: $title from $appName (Priority: $priority)")
+                
+                Log.d(TAG, "Saved notification: $title from $appName (Priority: $priority, " +
+                        "Sentiment: ${analysisResult?.sentiment}, Urgency: ${analysisResult?.urgencyScore})")
             } catch (e: Exception) {
-                Log.e(TAG, "Error saving notification", e)
+                Log.e(TAG, "Error processing notification", e)
+                // Save without sentiment if analysis fails
+                try {
+                    repository.insertNotification(notificationModel)
+                } catch (saveError: Exception) {
+                    Log.e(TAG, "Error saving notification", saveError)
+                }
             }
         }
     }
@@ -88,6 +134,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     
     override fun onDestroy() {
         super.onDestroy()
+        sentimentAnalysisService.unload()
         database.close()
     }
     
