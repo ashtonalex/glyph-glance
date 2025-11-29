@@ -1,1 +1,0 @@
-Place the KetchumSDK jar file in this directory.

@@ -1,7 +1,0 @@
---------- beginning of main
-11-29 02:05:50.832 10388 10430 I System.out: LiveLogger: Test 3: Toggle Channel #13
-11-29 02:05:51.438 10388 10432 I System.out: LiveLogger: Test 3: Toggle Channel #14
-11-29 02:05:52.042 10388 10432 I System.out: LiveLogger: Test 3: Toggle Channel #15
-11-29 02:05:52.646 10388 10432 I System.out: LiveLogger: Test 3: Toggle Channel #16
-11-29 02:05:53.250 10388 10432 I System.out: LiveLogger: Diagnostic Complete
-11-29 02:05:54.959 10388 10425 I System.out: Test complete.
