@@ -10,8 +10,10 @@ import com.example.glyph_glance.data.database.AppDatabase
 import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.preferences.AndroidPreferencesManager
 import com.example.glyph_glance.data.repository.NotificationRepositoryImpl
+import com.example.glyph_glance.di.AppModule
+import com.example.glyph_glance.logic.GlyphIntelligenceEngine
+import com.example.glyph_glance.logic.GlyphPattern
 import com.example.glyph_glance.logic.calculatePriority
-import com.example.glyph_glance.logic.SentimentAnalysisService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,14 +22,20 @@ import kotlinx.coroutines.launch
 class GlyphNotificationListenerService : NotificationListenerService() {
     
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private lateinit var database: AppDatabase
+    private lateinit var notificationDatabase: AppDatabase
     private lateinit var repository: NotificationRepositoryImpl
     private lateinit var preferencesManager: AndroidPreferencesManager
-    private val sentimentAnalysisService = SentimentAnalysisService()
+    private lateinit var intelligenceEngine: GlyphIntelligenceEngine
     
     override fun onCreate() {
         super.onCreate()
-        database = Room.databaseBuilder(
+        
+        // Initialize AppModule for AI and contact/rule database
+        AppModule.initialize(applicationContext)
+        intelligenceEngine = AppModule.getIntelligenceEngine()
+        
+        // Initialize notification database (separate from contact/rule database)
+        notificationDatabase = Room.databaseBuilder(
             applicationContext,
             AppDatabase::class.java,
             "glyph_glance_db"
@@ -35,24 +43,10 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         .addMigrations(AppDatabase.MIGRATION_1_2)
         .build()
         
-        repository = NotificationRepositoryImpl(database.notificationDao())
+        repository = NotificationRepositoryImpl(notificationDatabase.notificationDao())
         preferencesManager = AndroidPreferencesManager(applicationContext)
         
-        // Initialize sentiment analysis service in background
-        serviceScope.launch {
-            try {
-                val initialized = sentimentAnalysisService.initialize()
-                if (initialized) {
-                    Log.d(TAG, "Sentiment analysis service initialized successfully")
-                } else {
-                    Log.w(TAG, "Failed to initialize sentiment analysis service")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error initializing sentiment analysis service", e)
-            }
-        }
-        
-        Log.d(TAG, "Notification Listener Service Created")
+        Log.d(TAG, "Notification Listener Service Created with GlyphIntelligenceEngine")
     }
     
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -72,7 +66,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         val message = notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
         
         // Ignore empty notifications
-       if (title.isEmpty() && message.isEmpty()) return
+        if (title.isEmpty() && message.isEmpty()) return
         
         // Determine base priority based on notification importance
         val importance = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
@@ -83,28 +77,23 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         
         val basePriority = NotificationPriority.fromImportance(importance)
         
-        // Process notification: analyze sentiment, calculate priority from rules, and save to database
+        // Process notification through GlyphIntelligenceEngine
         serviceScope.launch {
             try {
-                // Perform sentiment analysis
+                // Build full text for analysis
                 val fullText = if (title.isNotEmpty() && message.isNotEmpty()) {
                     "$title: $message"
                 } else {
                     title.ifEmpty { message }
                 }
                 
-                val analysisResult = sentimentAnalysisService.analyzeNotification(
-                    content = fullText,
-                    senderId = appName
-                )
+                // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
+                val decision = intelligenceEngine.processNotification(fullText, appName)
                 
-                // Load keyword and app rules to calculate priority
+                // Also apply preferences-based rules (keyword and app rules from preferences)
                 val keywordRules = preferencesManager.getKeywordRules()
                 val appRules = preferencesManager.getAppRules()
-                
-                // Calculate priority based on rules (high priority keywords override lower priority ones)
-                // Pass both package name and app name so app rules can match by either
-                val calculatedPriority = calculatePriority(
+                val preferencePriority = calculatePriority(
                     text = fullText,
                     appPackage = sbn.packageName,
                     appName = appName,
@@ -113,21 +102,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     basePriority = basePriority
                 )
                 
-                // Determine final urgency score
-                val aiUrgencyScore = analysisResult?.urgencyScore ?: 3
-                val rulesMatched = calculatedPriority != basePriority
-                
-                val finalUrgencyScore = if (rulesMatched) {
-                    // If rules matched, use the maximum of AI score and rule-based score
-                    // This ensures AI score is never lowered, but rules can increase it
-                    val ruleBasedUrgencyScore = calculatedPriority.toUrgencyScore()
-                    maxOf(aiUrgencyScore, ruleBasedUrgencyScore)
-                } else {
-                    // If no rules matched, use AI urgency score directly
-                    aiUrgencyScore
-                }
-                
-                // Final priority should match the final urgency score
+                // Combine AI urgency with preference rules (take maximum)
+                val preferenceUrgencyScore = preferencePriority.toUrgencyScore()
+                val finalUrgencyScore = maxOf(decision.urgencyScore, preferenceUrgencyScore)
                 val finalPriority = NotificationPriority.fromUrgencyScore(finalUrgencyScore)
                 
                 val notificationModel = com.example.glyph_glance.data.models.Notification(
@@ -137,18 +114,25 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     priority = finalPriority,
                     appPackage = sbn.packageName,
                     appName = appName,
-                    sentiment = analysisResult?.sentiment,
+                    sentiment = decision.sentiment,
                     urgencyScore = finalUrgencyScore
                 )
                 
                 // Save to database
                 repository.insertNotification(notificationModel)
                 
-                Log.d(TAG, "Saved notification: $title from $appName (Priority: $finalPriority (rule-based: $calculatedPriority, base: $basePriority), " +
-                        "Sentiment: ${analysisResult?.sentiment}, AI Urgency: ${analysisResult?.urgencyScore}, Final Urgency: $finalUrgencyScore)")
+                // Log with glyph pattern info
+                Log.d(TAG, "Saved notification: $title from $appName " +
+                        "(Priority: $finalPriority, AI Urgency: ${decision.urgencyScore}, Final Urgency: $finalUrgencyScore, " +
+                        "Sentiment: ${decision.sentiment}, Pattern: ${decision.pattern}, ShouldLightUp: ${decision.shouldLightUp})")
+                
+                // Handle glyph pattern if needed
+                if (decision.shouldLightUp) {
+                    handleGlyphPattern(decision.pattern)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing notification", e)
-                // Save without sentiment if analysis fails, but still try to calculate priority
+                // Save with fallback priority if processing fails
                 try {
                     val keywordRules = preferencesManager.getKeywordRules()
                     val appRules = preferencesManager.getAppRules()
@@ -183,6 +167,23 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         }
     }
     
+    private fun handleGlyphPattern(pattern: GlyphPattern) {
+        // TODO: Implement actual glyph light control based on pattern
+        when (pattern) {
+            GlyphPattern.URGENT -> {
+                Log.d(TAG, "Triggering URGENT glyph pattern")
+                // Trigger urgent/strobe pattern
+            }
+            GlyphPattern.AMBER_BREATHE -> {
+                Log.d(TAG, "Triggering AMBER_BREATHE glyph pattern")
+                // Trigger amber breathing pattern
+            }
+            GlyphPattern.NONE -> {
+                // No pattern needed
+            }
+        }
+    }
+    
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         // Optional: Handle notification removal
         Log.d(TAG, "Notification removed: ${sbn.notification.extras.getCharSequence(Notification.EXTRA_TITLE)}")
@@ -190,8 +191,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     
     override fun onDestroy() {
         super.onDestroy()
-        sentimentAnalysisService.unload()
-        database.close()
+        notificationDatabase.close()
     }
     
     companion object {

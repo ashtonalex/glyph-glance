@@ -16,7 +16,13 @@ interface RulesRepository {
 
 data class DecisionResult(
     val shouldLightUp: Boolean,
-    val pattern: GlyphPattern // Enum: RED_STROBE, AMBER_BREATHE, NONE
+    val pattern: GlyphPattern,
+    // Analysis data from SentimentAnalysisService
+    val urgencyScore: Int,
+    val sentiment: String,
+    val rawAiResponse: String? = null,
+    // Rule matching info
+    val triggeredRuleId: Int? = null
 )
 
 enum class GlyphPattern {
