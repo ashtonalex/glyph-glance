@@ -390,19 +390,6 @@ fun DashboardScreen() {
                         Row(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Recent Activity",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = TextWhite,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "(${filteredNotifications.size})",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextGrey
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
                             val rotationAngle by animateFloatAsState(
                                 targetValue = if (activityExpanded) 180f else 0f,
                                 animationSpec = tween(300, easing = FastOutSlowInEasing),
@@ -416,10 +403,43 @@ fun DashboardScreen() {
                                     .size(20.dp)
                                     .rotate(rotationAngle)
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Recent Activity",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextWhite,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "(${filteredNotifications.size})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextGrey
+                            )
                         }
-                        
-                        // Filter and Sort Controls
+                    }
+                    
+                    // Filter and Sort Controls - Only visible when expanded
+                    AnimatedVisibility(
+                        visible = activityExpanded,
+                        enter = expandVertically(
+                            animationSpec = tween(300, easing = FastOutSlowInEasing),
+                            expandFrom = Alignment.Top
+                        ) + fadeIn(
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        ),
+                        exit = shrinkVertically(
+                            animationSpec = tween(300, easing = FastOutSlowInEasing),
+                            shrinkTowards = Alignment.Top
+                        ) + fadeOut(
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        )
+                    ) {
                         Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1069,19 +1089,6 @@ fun KeywordsSection(
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Keywords",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextWhite,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "(${keywords.size})",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextGrey
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
                     val rotationAngle by animateFloatAsState(
                         targetValue = if (isExpanded) 180f else 0f,
                         animationSpec = tween(300, easing = FastOutSlowInEasing),
@@ -1094,6 +1101,19 @@ fun KeywordsSection(
                         modifier = Modifier
                             .size(20.dp)
                             .rotate(rotationAngle)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Keywords",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextWhite,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "(${keywords.size})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextGrey
                     )
                 }
                 
@@ -1181,19 +1201,6 @@ fun AppsSection(
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Apps",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextWhite,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "(${appRules.size})",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextGrey
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
                     val rotationAngle by animateFloatAsState(
                         targetValue = if (isExpanded) 180f else 0f,
                         animationSpec = tween(300, easing = FastOutSlowInEasing),
@@ -1206,6 +1213,19 @@ fun AppsSection(
                         modifier = Modifier
                             .size(20.dp)
                             .rotate(rotationAngle)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Apps",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextWhite,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "(${appRules.size})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextGrey
                     )
                 }
                 
