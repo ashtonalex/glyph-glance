@@ -155,9 +155,6 @@ class GlyphIntelligenceEngine(
         // 5. Rule Matching (database rules)
         val activeRules = ruleDao.getAllRules()
         val triggeredRule = matchRules(text, senderId, activeRules)
-        
-        // Final urgency score after all adjustments
-        val finalUrgencyScore = semanticAdjustedScore
 
         // 6. Determine Glyph Pattern based on urgency and rules
         val shouldLightUp = triggeredRule != null || finalUrgencyScore >= 4

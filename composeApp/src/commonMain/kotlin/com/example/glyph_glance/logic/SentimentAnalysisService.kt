@@ -318,14 +318,16 @@ class SentimentAnalysisService {
         
         val startTime = System.currentTimeMillis()
         
-        return try {
-            val appContext = inferAppContext(senderId)
-            // Simplified prompt for faster responses - just need a number
-            // Explicitly state this is a standalone request with no previous context
-            val systemPrompt = "You are an urgency evaluator. Each request is independent with no conversation history."
-            
-            val userPrompt = """
-                Rate notification urgency 1(lowest)-6(critical).
+        // Serialize access to Cactus SDK to prevent concurrent access crashes
+        return analysisMutex.withLock {
+            try {
+                val appContext = inferAppContext(senderId)
+                // Simplified prompt for faster responses - just need a number
+                // Explicitly state this is a standalone request with no previous context
+                val systemPrompt = "You are an urgency evaluator. Each request is independent with no conversation history."
+                
+                val userPrompt = """
+                    Rate notification urgency 1(lowest)-6(critical).
 Scale: 1-2=Ignore/Casual, 3-4=Timely, 5-6=Immediate/Emergency.
 App: $appContext
 Sender: "$senderId"

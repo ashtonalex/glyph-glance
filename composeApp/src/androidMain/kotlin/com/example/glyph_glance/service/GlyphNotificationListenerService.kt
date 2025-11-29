@@ -169,6 +169,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 LiveLogger.decrementQueuing()
                 LiveLogger.setProcessingNotification(true)
 
+                // Calculate preference priority for database storage (but NOT for glyph flashing)
                 val preferencePriority = calculatePriority(
                     text = fullText,
                     appPackage = sbn.packageName,
@@ -179,41 +180,22 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 )
                 val preferenceUrgencyScore = preferencePriority.toUrgencyScore()
                 
-                // If user keyword rules give urgency 6, skip AI for instant priority
-                val finalUrgencyScore: Int
-                val finalPriority: NotificationPriority
-                val decision: DecisionResult
+                // For database: combine AI urgency with preference rules (take maximum)
+                val finalUrgencyScoreForDb = maxOf(decision.urgencyScore, preferenceUrgencyScore)
+                val finalPriority = NotificationPriority.fromUrgencyScore(finalUrgencyScoreForDb)
                 
-                if (preferenceUrgencyScore >= 6) {
-                    // Instant priority - skip AI processing
-                    Log.d(TAG, "Urgency 6 keyword detected: $appName - skipping AI for instant priority")
-                    LiveLogger.addLog(
-                        type = com.example.glyph_glance.logging.LogType.AI_RESPONSE,
-                        message = "⚡ Instant Priority: $appName (urgency → 6, AI skipped)",
-                        status = com.example.glyph_glance.logging.LogStatus.INFO
-                    )
-                    
-                    finalUrgencyScore = 6
-                    finalPriority = NotificationPriority.HIGH
-                    decision = DecisionResult(
-                        shouldLightUp = true,
-                        pattern = GlyphPattern.URGENT,
-                        urgencyScore = 6,
-                        sentiment = "URGENT",
-                        rawAiResponse = "[Urgency 6 keyword detected - AI analysis skipped for instant priority]",
-                        triggeredRuleId = null,
-                        semanticMatched = false,
-                        semanticCategories = emptySet(),
-                        semanticBoost = 0
-                    )
-                } else {
-                    // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
-                    decision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
-                    
-                    // Combine AI urgency with preference rules (take maximum)
-                    finalUrgencyScore = maxOf(decision.urgencyScore, preferenceUrgencyScore)
-                    finalPriority = NotificationPriority.fromUrgencyScore(finalUrgencyScore)
+                // For glyph flashing: use ONLY the LLM urgency score (ignore preference rules)
+                val llmUrgencyScore = decision.urgencyScore
+                val shouldLightUp = llmUrgencyScore >= 4 || decision.triggeredRuleId != null
+                val finalPattern = when {
+                    llmUrgencyScore >= 5 -> GlyphPattern.URGENT
+                    llmUrgencyScore >= 4 || decision.triggeredRuleId != null -> GlyphPattern.AMBER_BREATHE
+                    else -> GlyphPattern.NONE
                 }
+                
+                Log.d(TAG, "Flagging check - LLM Urgency Score: $llmUrgencyScore (used for glyph), " +
+                        "PreferenceUrgencyScore: $preferenceUrgencyScore, FinalUrgencyScoreForDb: $finalUrgencyScoreForDb, " +
+                        "TriggeredRuleId: ${decision.triggeredRuleId}, FinalShouldLightUp: $shouldLightUp, FinalPattern: $finalPattern")
                 
                 val notificationModel = com.example.glyph_glance.data.models.Notification(
                     title = title,
@@ -223,7 +205,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     appPackage = sbn.packageName,
                     appName = appName,
                     sentiment = decision.sentiment,
-                    urgencyScore = finalUrgencyScore,
+                    urgencyScore = finalUrgencyScoreForDb, // Store combined score in DB
                     rawAiResponse = decision.rawAiResponse
                 )
                 
@@ -232,14 +214,14 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 
                 // Log with glyph pattern info
                 Log.d(TAG, "Saved notification: $title from $appName " +
-                        "(Priority: $finalPriority, AI Urgency: ${decision.urgencyScore}, Final Urgency: $finalUrgencyScore, " +
-                        "Sentiment: ${decision.sentiment}, Pattern: ${decision.pattern}, ShouldLightUp: ${decision.shouldLightUp})")
+                        "(Priority: $finalPriority, LLM Urgency: $llmUrgencyScore, DB Urgency: $finalUrgencyScoreForDb, " +
+                        "Sentiment: ${decision.sentiment}, Pattern: $finalPattern, ShouldLightUp: $shouldLightUp)")
                 
-                // Handle glyph pattern if needed
-                if (decision.shouldLightUp) {
-                    handleGlyphPattern(decision.pattern)
+                // Handle glyph pattern ONLY after all processing is complete and message is flagged
+                if (shouldLightUp) {
+                    handleGlyphPattern(finalPattern)
                 } else {
-                    LiveLogger.logGlyphInteraction(decision.pattern.name, false)
+                    LiveLogger.logGlyphInteraction(finalPattern.name, false)
                 }
                 
                 // Processing complete
@@ -290,6 +272,8 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         // Log glyph interaction
         LiveLogger.logGlyphInteraction(pattern.name, pattern != GlyphPattern.NONE)
         
+        Log.d(TAG, "handleGlyphPattern called with pattern: $pattern")
+        
         // Flash glyph 3 times whenever a message is flagged (any pattern except NONE)
         when (pattern) {
             GlyphPattern.URGENT -> {
@@ -301,6 +285,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 glyphManager.flashThreeTimes()
             }
             GlyphPattern.NONE -> {
+                Log.d(TAG, "No glyph pattern - skipping flash")
                 // No pattern needed
             }
         }
