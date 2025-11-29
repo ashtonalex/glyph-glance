@@ -22,5 +22,6 @@ data class DecisionResult(
 enum class GlyphPattern {
     URGENT,
     AMBER_BREATHE,
+    MATRIX_RAIN,
     NONE
 }

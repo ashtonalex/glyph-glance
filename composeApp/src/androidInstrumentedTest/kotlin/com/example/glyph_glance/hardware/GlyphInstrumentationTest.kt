@@ -28,12 +28,12 @@ class GlyphInstrumentationTest {
                 println("WARNING: Not connected.")
             } 
 
-            // Run the diagnostic sequence
-            println("Running Diagnostic Sequence (Watch your phone!)...")
+            // Run the brute force sequence
+            println("Running Brute Force Sequence (Watch your phone!)...")
             glyphManager.triggerPattern(GlyphPattern.URGENT)
             
-            // Wait enough time for the sequence (5 channels * 1.5s = ~7.5s)
-            delay(8000)
+            // Wait enough time for the sequence (17 channels * 0.7s = ~12s)
+            delay(15000)
             
             println("Test complete.")
         }

@@ -9,6 +9,7 @@ import androidx.room.Room
 import com.example.glyph_glance.data.database.AppDatabase
 import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.repository.NotificationRepositoryImpl
+import com.example.glyph_glance.di.AppModule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,6 +23,14 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     
     override fun onCreate() {
         super.onCreate()
+        
+        // Ensure AppModule is initialized
+        try {
+            AppModule.initialize(applicationContext)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize AppModule in Service", e)
+        }
+
         database = Room.databaseBuilder(
             applicationContext,
             AppDatabase::class.java,
@@ -49,7 +58,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         val message = notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
         
         // Ignore empty notifications
-       if (title.isEmpty() && message.isEmpty()) return
+        if (title.isEmpty() && message.isEmpty()) return
         
         // Determine priority based on notification importance
         val importance = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
@@ -74,7 +83,22 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         serviceScope.launch {
             try {
                 repository.insertNotification(notificationModel)
-                Log.d(TAG, "Saved notification: $title from $appName (Priority: $priority)")
+                Log.d(TAG, "Saved notification: $title from $appName")
+                
+                // TRIGGER GLYPH LOGIC
+                // Pass to BufferEngine to handle patterns/logic
+                try {
+                    val bufferEngine = AppModule.getBufferEngine()
+                    // Use title (sender name) as senderId
+                    val senderId = if (title.isNotEmpty()) title else appName
+                    val fullText = if (title.isNotEmpty()) "$title: $message" else message
+                    
+                    bufferEngine.handleIncoming(senderId, fullText)
+                    Log.d(TAG, "Passed notification to BufferEngine: $senderId")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error passing to BufferEngine", e)
+                }
+
             } catch (e: Exception) {
                 Log.e(TAG, "Error saving notification", e)
             }

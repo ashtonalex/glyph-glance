@@ -28,22 +28,37 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+import com.example.glyph_glance.logic.GlyphPattern
+import com.example.glyph_glance.service.LiveLogger
+
+// ... (other imports remain same)
+
 @Composable
 fun DashboardScreen() {
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DarkBackground)
-            .padding(16.dp),
-        contentPadding = PaddingValues(bottom = 80.dp) // Space for bottom nav
+        // ... existing modifier ...
     ) {
-        // Header
+        // ... existing Header ...
         item {
             HeaderSection()
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        // Summary Cards
+        // DEBUG SECTION
+        item {
+            androidx.compose.material3.Button(
+                onClick = { 
+                    // This will be intercepted by Platform specific code or handled via shared logic
+                    // But for now, we just log it. The button in MainActivity handles the hardware trigger directly.
+                    LiveLogger.addLog("Dashboard Button Clicked (No-op here, use MainActivity button)")
+                },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Text("This is the Common UI - Use the Button Below Header in Main App")
+            }
+        }
+
+        // ... existing Summary ...        // Summary Cards
         item {
             SummarySection()
             Spacer(modifier = Modifier.height(24.dp))

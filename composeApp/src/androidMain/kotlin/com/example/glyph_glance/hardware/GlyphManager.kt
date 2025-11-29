@@ -3,177 +3,284 @@ package com.example.glyph_glance.hardware
 import android.content.ComponentName
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import com.example.glyph_glance.logic.GlyphPattern
 import com.example.glyph_glance.service.LiveLogger
-import com.nothing.ketchum.Common
 import com.nothing.ketchum.Glyph
-import com.nothing.ketchum.GlyphException
 import com.nothing.ketchum.GlyphFrame
 import com.nothing.ketchum.GlyphManager as NothingGlyphManager
+import com.nothing.ketchum.GlyphMatrixFrame
+import com.nothing.ketchum.GlyphMatrixManager
+import com.nothing.ketchum.GlyphMatrixObject
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Manages Glyph hardware interface for Nothing phones.
- * Provides mock implementation for non-Nothing devices during development.
+ * Manages interactions with the Nothing Glyph Interface.
+ * Supports both the standard Glyph Interface (GlyphManager) and the new Glyph Matrix (GlyphMatrixManager).
  */
 class GlyphManager(private val context: Context) {
 
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    
+    // Legacy Glyph Manager (Phone (1), Phone (2), Phone (2a))
     private var nothingGlyphManager: NothingGlyphManager? = null
     private var glyphFrameBuilder: GlyphFrame.Builder? = null
-    
-    val isConnected = MutableStateFlow(false)
-    
-    private val callback = object : NothingGlyphManager.Callback {
+
+    // New Glyph Matrix Manager (Phone (3))
+    private var glyphMatrixManager: GlyphMatrixManager? = null
+
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected = _isConnected.asStateFlow()
+
+    private val isMatrixSupported = AtomicBoolean(false)
+
+    // Callback for Glyph Matrix
+    private val matrixCallback = object : GlyphMatrixManager.Callback {
         override fun onServiceConnected(componentName: ComponentName?) {
-             LiveLogger.addLog("Glyph Service Connected")
-             try {
-                 // Register with package name
-                 nothingGlyphManager?.register(context.packageName)
-                 
-                 // Try to open session (some SDKs require this, some don't)
-                 nothingGlyphManager?.openSession()
-                 
-                 isConnected.value = true
-                 LiveLogger.addLog("Glyph Registered & Session Opened")
-             } catch (e: Exception) {
-                 LiveLogger.addLog("Failed to open session: ${e.message}")
-             }
+            LiveLogger.addLog("Glyph Matrix Service Connected")
+            try {
+                // Register for Phone 3 Glyph Matrix
+                glyphMatrixManager?.register(Glyph.DEVICE_23112)
+                _isConnected.value = true
+                isMatrixSupported.set(true)
+                LiveLogger.addLog("Glyph Matrix Registered")
+            } catch (e: Exception) {
+                LiveLogger.addLog("Failed to register Glyph Matrix: ${e.message}")
+            }
         }
 
         override fun onServiceDisconnected(componentName: ComponentName?) {
-             LiveLogger.addLog("Glyph Service Disconnected")
-             isConnected.value = false
-        }
-    }
-    
-    init {
-        try {
-            if (isNothingPhone()) {
-                nothingGlyphManager = NothingGlyphManager.getInstance(context)
-                nothingGlyphManager?.init(callback)
-                glyphFrameBuilder = GlyphFrame.Builder()
-                LiveLogger.addLog("GlyphManager initialized (Hardware)")
-            } else {
-                LiveLogger.addLog("GlyphManager initialized (Mock)")
-            }
-        } catch (e: Exception) {
-            LiveLogger.addLog("Failed to init Nothing SDK: ${e.message}")
+            LiveLogger.addLog("Glyph Matrix Service Disconnected")
+            _isConnected.value = false
+            isMatrixSupported.set(false)
         }
     }
 
-    fun triggerPattern(pattern: GlyphPattern) {
-        if (!isConnected.value) {
-            LiveLogger.addLog("Glyph not connected")
+    // Callback for Legacy Glyph
+    private val legacyCallback = object : NothingGlyphManager.Callback {
+        override fun onServiceConnected(componentName: ComponentName?) {
+             LiveLogger.addLog("Legacy Glyph Service Connected")
+             try {
+                 nothingGlyphManager?.register(context.packageName)
+                 nothingGlyphManager?.openSession()
+                 _isConnected.value = true
+                 LiveLogger.addLog("Legacy Session Opened")
+             } catch (e: Exception) {
+                 LiveLogger.addLog("Failed to open legacy session: ${e.message}")
+             }
+        }
+        override fun onServiceDisconnected(componentName: ComponentName?) {
+             LiveLogger.addLog("Legacy Glyph Service Disconnected")
+             if (!isMatrixSupported.get()) {
+                 _isConnected.value = false
+             }
+        }
+    }
+
+    init {
+        connect()
+    }
+
+    fun connect() {
+        if (!isNothingPhone()) {
+            LiveLogger.addLog("Not a Nothing phone, skipping Glyph init")
             return
         }
 
-        when (pattern) {
-            GlyphPattern.URGENT -> runDiagnosticSequence() 
-            GlyphPattern.AMBER_BREATHE -> playBreatheAmber()
-            GlyphPattern.NONE -> turnOff()
-        }
-    }
-
-    private fun runDiagnosticSequence() {
-        LiveLogger.addLog("STARTING DIAGNOSTIC: Testing Channels A-E")
-        CoroutineScope(Dispatchers.IO).launch {
-            // Channel A
-            testChannel("A") { it.buildChannelA() }
-            
-            // Channel B
-            testChannel("B") { it.buildChannelB() }
-            
-            // Channel C
-            testChannel("C") { it.buildChannelC() }
-            
-            // Channel D
-            testChannel("D") { it.buildChannelD() }
-            
-            // Channel E
-            testChannel("E") { it.buildChannelE() }
-            
-            // Numeric Channel Scan (0-4)
-            testNumericChannels()
-            
-            LiveLogger.addLog("Diagnostic Complete")
-        }
-    }
-
-    private suspend fun testChannel(name: String, channelBuilder: (GlyphFrame.Builder) -> GlyphFrame.Builder) {
+        // Initialize Matrix Manager
         try {
-            if (nothingGlyphManager == null || glyphFrameBuilder == null) return
-            
-            LiveLogger.addLog("Testing Channel $name (Toggle ON)")
-            
-            val frame = channelBuilder(glyphFrameBuilder!!)
-                .buildPeriod(1000)
-                .buildCycles(1)
-                .buildInterval(0)
-                .build()
-                
-            nothingGlyphManager?.toggle(frame)
-            delay(1500)
-            nothingGlyphManager?.turnOff()
-            delay(500)
-            
+            glyphMatrixManager = GlyphMatrixManager.getInstance(context.applicationContext)
+            glyphMatrixManager?.init(matrixCallback)
+            LiveLogger.addLog("GlyphMatrixManager initialized")
         } catch (e: Exception) {
-            LiveLogger.addLog("Failed Channel $name: ${e.message}")
+             LiveLogger.addLog("GlyphMatrixManager init failed (Old SDK/Device?): ${e.message}")
+        }
+
+        // Initialize Legacy Manager
+        try {
+            nothingGlyphManager = NothingGlyphManager.getInstance(context.applicationContext)
+            nothingGlyphManager?.init(legacyCallback)
+            glyphFrameBuilder = GlyphFrame.Builder()
+        } catch (e: Exception) {
+            LiveLogger.addLog("NothingGlyphManager init failed: ${e.message}")
         }
     }
-    
-    private suspend fun testNumericChannels() {
+
+    fun disconnect() {
         try {
-            if (nothingGlyphManager == null || glyphFrameBuilder == null) return
-            LiveLogger.addLog("Testing Numeric Channels 0-4")
-            
-            for (i in 0..4) {
-                LiveLogger.addLog("Testing Channel ID $i")
-                val frame = glyphFrameBuilder!!
-                    .buildChannel(i)
-                    .buildPeriod(1000)
-                    .buildCycles(1)
-                    .buildInterval(0)
-                    .build()
-                    
-                nothingGlyphManager?.toggle(frame)
-                delay(1500)
-                nothingGlyphManager?.turnOff()
+            if (isMatrixSupported.get()) {
+                glyphMatrixManager?.closeAppMatrix()
+                glyphMatrixManager?.unInit()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error un-initing matrix: ${e.message}")
+        }
+        try {
+            nothingGlyphManager?.closeSession()
+            nothingGlyphManager?.unInit()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error un-initing legacy: ${e.message}")
+        }
+        _isConnected.value = false
+    }
+
+    fun triggerPattern(pattern: GlyphPattern) {
+        scope.launch {
+            if (!_isConnected.value) {
+                LiveLogger.addLog("Not connected, attempting to reconnect...")
+                connect()
                 delay(500)
             }
-        } catch(e: Exception) {
-             LiveLogger.addLog("Failed Numeric Test: ${e.message}")
+
+            if (isMatrixSupported.get() && glyphMatrixManager != null) {
+                handleMatrixPattern(pattern)
+            } else {
+                handleLegacyPattern(pattern)
+            }
         }
     }
 
-    private fun playBreatheAmber() {
+    private suspend fun handleMatrixPattern(pattern: GlyphPattern) {
+        LiveLogger.addLog("Playing Matrix Pattern: $pattern")
         try {
-            if (nothingGlyphManager != null && glyphFrameBuilder != null) {
-                val frame = glyphFrameBuilder!!
-                    .buildChannelA()
-                    .buildPeriod(2000)
-                    .buildCycles(3)
-                    .buildInterval(0)
-                    .build()
-                nothingGlyphManager?.animate(frame)
+            when (pattern) {
+                GlyphPattern.MATRIX_RAIN -> playMatrixRain()
+                GlyphPattern.URGENT -> playMatrixUrgent()
+                GlyphPattern.AMBER_BREATHE -> playMatrixBreathe()
+                GlyphPattern.NONE -> clearMatrix()
             }
         } catch (e: Exception) {
-             LiveLogger.addLog("Error playing breathe: ${e.message}")
+            LiveLogger.addLog("Error playing matrix pattern: ${e.message}")
+        }
+    }
+
+    private suspend fun playMatrixRain() {
+        // Simple falling "10101" animation
+        try {
+            // 1. Create text object
+            val rainTextBuilder = GlyphMatrixObject.Builder()
+            // 2. Animate falling
+            for (y in -25..25 step 2) {
+                if (!currentCoroutineContext().isActive) break // Check coroutine cancellation
+                
+                val rainObject = GlyphMatrixObject.Builder()
+                    .setText("10101") 
+                    .setPosition(0, y)
+                    .build()
+                    
+                val frame = GlyphMatrixFrame.Builder()
+                    .addTop(rainObject)
+                    .build(context)
+                
+                // Use setAppMatrixFrame for app-driven control
+                glyphMatrixManager?.setAppMatrixFrame(frame.render())
+                delay(50) 
+            }
+            clearMatrix()
+        } catch (e: Exception) {
+            LiveLogger.addLog("Matrix Rain failed: ${e.message}")
+        }
+    }
+
+    private suspend fun playMatrixUrgent() {
+        try {
+            // Rapid flashing
+            val fullFrame = GlyphMatrixFrame.Builder()
+                // Use scaled up text for maximum coverage
+                .addTop(GlyphMatrixObject.Builder().setText("!!!").setScale(200).build()) 
+                .build(context)
+
+            val emptyFrame = GlyphMatrixFrame.Builder().build(context)
+
+            repeat(5) {
+                glyphMatrixManager?.setAppMatrixFrame(fullFrame.render())
+                delay(150)
+                glyphMatrixManager?.setAppMatrixFrame(emptyFrame.render())
+                delay(150)
+            }
+        } catch (e: Exception) {
+            LiveLogger.addLog("Matrix Urgent failed: ${e.message}")
         }
     }
     
-    private fun turnOff() {
+    private suspend fun playMatrixBreathe() {
+        // Pulsing brightness
         try {
-            nothingGlyphManager?.turnOff()
-        } catch (e: Exception) { }
+            val textObj = GlyphMatrixObject.Builder().setText("OOO").build()
+            
+            // Breathe in
+            for (b in 0..255 step 25) {
+                val obj = GlyphMatrixObject.Builder()
+                    .setText("OOO")
+                    .setBrightness(b)
+                    .build()
+                val frame = GlyphMatrixFrame.Builder().addTop(obj).build(context)
+                glyphMatrixManager?.setAppMatrixFrame(frame.render())
+                delay(50)
+            }
+            // Breathe out
+            for (b in 255 downTo 0 step 25) {
+                val obj = GlyphMatrixObject.Builder()
+                    .setText("OOO")
+                    .setBrightness(b)
+                    .build()
+                val frame = GlyphMatrixFrame.Builder().addTop(obj).build(context)
+                glyphMatrixManager?.setAppMatrixFrame(frame.render())
+                delay(50)
+            }
+            clearMatrix()
+        } catch (e: Exception) {
+             LiveLogger.addLog("Matrix Breathe failed: ${e.message}")
+        }
+    }
+
+    private fun clearMatrix() {
+         try {
+             val frame = GlyphMatrixFrame.Builder().build(context)
+             glyphMatrixManager?.setAppMatrixFrame(frame.render())
+         } catch(e: Exception) {
+             LiveLogger.addLog("Error clearing matrix: ${e.message}")
+         }
+    }
+
+    private suspend fun handleLegacyPattern(pattern: GlyphPattern) {
+        LiveLogger.addLog("Playing Legacy Pattern: $pattern")
+        if (nothingGlyphManager == null || glyphFrameBuilder == null) return
+
+        try {
+            when (pattern) {
+                GlyphPattern.URGENT -> {
+                    // Flash Channel C (Rear)
+                    val frame = glyphFrameBuilder!!.buildChannelC().buildPeriod(100).buildCycles(5).build()
+                    nothingGlyphManager?.animate(frame)
+                }
+                GlyphPattern.AMBER_BREATHE -> {
+                    // Breathe Channel C
+                    val frame = glyphFrameBuilder!!.buildChannelC().buildPeriod(2000).buildCycles(1).build()
+                    nothingGlyphManager?.animate(frame)
+                }
+                GlyphPattern.MATRIX_RAIN -> {
+                    // Fallback to a complex pattern on C
+                    val frame = glyphFrameBuilder!!.buildChannelC().buildPeriod(300).buildCycles(3).build()
+                    nothingGlyphManager?.animate(frame)
+                }
+                GlyphPattern.NONE -> {
+                    nothingGlyphManager?.turnOff()
+                }
+            }
+        } catch (e: Exception) {
+            LiveLogger.addLog("Legacy pattern failed: ${e.message}")
+        }
     }
 
     private fun isNothingPhone(): Boolean {
-        val manufacturer = Build.MANUFACTURER.lowercase()
-        val model = Build.MODEL.lowercase()
-        return manufacturer.contains("nothing") || model.contains("nothing")
+        return Build.MANUFACTURER.contains("nothing", ignoreCase = true)
+    }
+
+    companion object {
+        private const val TAG = "GlyphManager"
     }
 }

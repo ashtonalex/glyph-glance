@@ -100,6 +100,12 @@ def simulate_casual_chat():
     send_adb_notification("Friend", "See you for dinner at 7")
     print("--- Casual Chat Simulation Complete ---\n")
 
+def simulate_matrix_code():
+    """Simulates a message that triggers the Matrix Rain effect."""
+    print("\n--- Simulating Matrix Code ---")
+    send_adb_notification("Operator", "Wake up, Neo... The Matrix has you.")
+    print("--- Matrix Code Simulation Complete ---\n")
+
 def main():
     print("Initializing Mock Notifier for Glyph-Glance...")
     check_adb_connection()
@@ -109,6 +115,7 @@ def main():
         print("[1] Split Text Burst")
         print("[2] Urgent Alert")
         print("[3] Casual Chat")
+        print("[4] Matrix Code")
         print("[q] Quit")
         
         try:
@@ -123,6 +130,8 @@ def main():
             simulate_urgent_boss()
         elif choice == '3':
             simulate_casual_chat()
+        elif choice == '4':
+            simulate_matrix_code()
         elif choice == 'q':
             print("Exiting...")
             break
