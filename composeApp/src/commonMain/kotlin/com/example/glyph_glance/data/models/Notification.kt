@@ -13,5 +13,8 @@ data class Notification(
     val priority: NotificationPriority,
     val appPackage: String,
     val appName: String,
-    val isRead: Boolean = false
+    val isRead: Boolean = false,
+    val sentiment: String? = null, // "POSITIVE", "NEGATIVE", "NEUTRAL"
+    val urgencyScore: Int? = null, // 1-6
+    val rawAiResponse: String? = null // Raw AI thought process for analysis details
 )

@@ -14,11 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
-import com.example.glyph_glance.di.AppModule
-import com.example.glyph_glance.logic.GlyphPattern
-import com.example.glyph_glance.service.LiveLogger
+import androidx.core.view.WindowCompat
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,6 +41,12 @@ class MainActivity : ComponentActivity() {
         
         // Check if notification listener permission is granted
         val needsOnboarding = !isNotificationServiceEnabled()
+        // Make status bar black
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.BLACK
+        
+        // Note: Cactus SDK and AppModule are now initialized in GlyphGlanceApplication.onCreate()
+        // No need to initialize here since Application.onCreate() runs before Activity.onCreate()
 
         setContent {
             App()

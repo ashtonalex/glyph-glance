@@ -19,7 +19,8 @@ data class KeywordRule(
 data class AppRule(
     val packageName: String,
     val appName: String,
-    val priority: NotificationPriority
+    val priority: NotificationPriority,
+    val isIgnored: Boolean = false // If true, completely ignore notifications from this app
 )
 
 @Serializable

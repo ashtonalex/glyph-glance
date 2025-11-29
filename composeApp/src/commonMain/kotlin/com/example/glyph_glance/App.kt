@@ -1,18 +1,12 @@
 package com.example.glyph_glance
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
@@ -103,6 +97,26 @@ private fun MainAppContent(rulesRepository: RulesRepository? = null) {
                         unselectedIconColor = TextGrey,
                         unselectedTextColor = TextGrey,
                         indicatorColor = NeonPurple.copy(alpha = 0.1f)
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Black,
+            bottomBar = {
+                NavigationBar(
+                    containerColor = Color.Black,
+                    contentColor = TextWhite
+                ) {
+                    NavigationBarItem(
+                        selected = currentScreen == Screen.Dashboard,
+                        onClick = { currentScreen = Screen.Dashboard },
+                        icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
+                        label = { Text("Home") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = getThemeMediumPriority(),
+                            selectedTextColor = getThemeMediumPriority(),
+                            unselectedIconColor = TextGrey,
+                            unselectedTextColor = TextGrey,
+                            indicatorColor = getThemeMediumPriority().copy(alpha = 0.1f)
+                        )
                     )
                 )
                 NavigationBarItem(
@@ -130,6 +144,31 @@ private fun MainAppContent(rulesRepository: RulesRepository? = null) {
                 Screen.Terminal -> TerminalScreen()
                 Screen.Rules -> RulesScreen(rulesRepository = rulesRepository)
                 Screen.LedConfig -> LedConfigScreen()
+                    NavigationBarItem(
+                        selected = currentScreen == Screen.ActivityLogs,
+                        onClick = { currentScreen = Screen.ActivityLogs },
+                        icon = { Icon(Icons.Default.History, contentDescription = "Logs") },
+                        label = { Text("Logs") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = getThemeMediumPriority(),
+                            selectedTextColor = getThemeMediumPriority(),
+                            unselectedIconColor = TextGrey,
+                            unselectedTextColor = TextGrey,
+                            indicatorColor = getThemeMediumPriority().copy(alpha = 0.1f)
+                        )
+                    )
+                }
+            }
+        ) { innerPadding ->
+            Box(modifier = Modifier.padding(innerPadding)) {
+                // Solid light grey background
+                ThemeBackgroundGradient()
+                
+                when (currentScreen) {
+                    Screen.Dashboard -> DashboardScreen()
+                    Screen.LedConfig -> LedConfigScreen()
+                    Screen.ActivityLogs -> ActivityLogsScreen()
+                }
             }
         }
     }
@@ -137,91 +176,12 @@ private fun MainAppContent(rulesRepository: RulesRepository? = null) {
 
 @Composable
 fun ThemeBackgroundGradient() {
-    val themeColors = LocalThemeColors.current
-    val density = LocalDensity.current
-    
-    // Animate color changes smoothly with decreased opacity
-    val animatedHigh by animateColorAsState(
-        targetValue = themeColors.highPriority.copy(alpha = 0.06f),
-        animationSpec = tween(800, easing = FastOutSlowInEasing),
-        label = "high"
-    )
-    val animatedMedium by animateColorAsState(
-        targetValue = themeColors.mediumPriority.copy(alpha = 0.05f),
-        animationSpec = tween(800, easing = FastOutSlowInEasing),
-        label = "medium"
-    )
-    val animatedLow by animateColorAsState(
-        targetValue = themeColors.lowPriority.copy(alpha = 0.04f),
-        animationSpec = tween(800, easing = FastOutSlowInEasing),
-        label = "low"
-    )
-    
-    BoxWithConstraints(
+    // Simple solid black background
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(DarkBackground)
-    ) {
-        val screenWidth = constraints.maxWidth.toFloat()
-        val screenHeight = constraints.maxHeight.toFloat()
-        val gradientHeightPx = screenHeight * 0.25f // Top 25% of screen for lower density
-        val gradientHeight = with(density) { gradientHeightPx.toDp() }
-        
-        // Rectangular gradient at the top - high priority (left side)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(gradientHeight)
-                .background(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            animatedHigh,
-                            animatedHigh.copy(alpha = 0.01f),
-                            Color.Transparent
-                        ),
-                        startX = 0f,
-                        endX = screenWidth * 0.4f
-                    )
-                )
-        )
-        
-        // Rectangular gradient at the top - medium priority (center)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(gradientHeight)
-                .background(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            animatedMedium,
-                            animatedMedium.copy(alpha = 0.01f),
-                            Color.Transparent
-                        ),
-                        startX = screenWidth * 0.3f,
-                        endX = screenWidth * 0.7f
-                    )
-                )
-        )
-        
-        // Rectangular gradient at the top - low priority (right side)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(gradientHeight)
-                .background(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            animatedLow.copy(alpha = 0.01f),
-                            animatedLow
-                        ),
-                        startX = screenWidth * 0.6f,
-                        endX = screenWidth
-                    )
-                )
-        )
-    }
+            .background(Color.Black)
+    )
 }
 
 enum class Screen {
@@ -229,4 +189,7 @@ enum class Screen {
     Terminal,
     Rules,
     LedConfig
+}
+    LedConfig,
+    ActivityLogs
 }
