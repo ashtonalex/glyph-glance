@@ -29,29 +29,43 @@ class GlyphIntelligenceEngine(
         // Update contact stats with current timestamp
         updateContactStats(profile, senderId)
 
-        // 2. AI Analysis using SentimentAnalysisService
-        val analysisResult = sentimentAnalysisService.analyzeNotification(text, senderId)
-        val aiUrgencyScore = analysisResult?.urgencyScore ?: 3
-        val sentiment = analysisResult?.sentiment ?: "NEUTRAL"
-        val rawAiResponse = analysisResult?.rawAiResponse
-        
-        // 3. Semantic Keyword Matching (boosts urgency based on key phrases)
+        // 2. Check Semantic Keywords FIRST - if urgency 6 found, skip AI for instant priority
         // User-defined keywords take priority over pre-defined semantics
         val semanticResult = semanticMatcher.match(text, userKeywords)
-        val semanticAdjustedScore = if (semanticResult.matched) {
+        val semanticUrgency = if (semanticResult.matched) semanticResult.highestLevel else 0
+        
+        // If semantic/keyword match gives us max urgency (6), skip AI processing entirely
+        val skipAiProcessing = semanticUrgency >= 6
+        
+        val aiUrgencyScore: Int
+        val sentiment: String
+        val rawAiResponse: String?
+        
+        if (skipAiProcessing) {
+            // Instant priority - skip AI analysis for performance
+            aiUrgencyScore = 6
+            sentiment = "URGENT"
+            rawAiResponse = "[Urgency 6 keyword detected - AI analysis skipped for instant priority]"
+        } else {
+            // 3. AI Analysis using SentimentAnalysisService
+            val analysisResult = sentimentAnalysisService.analyzeNotification(text, senderId)
+            aiUrgencyScore = analysisResult?.urgencyScore ?: 3
+            sentiment = analysisResult?.sentiment ?: "NEUTRAL"
+            rawAiResponse = analysisResult?.rawAiResponse
+        }
+        
+        // 4. Calculate final score (max of AI and semantic)
+        val finalUrgencyScore = if (semanticResult.matched) {
             maxOf(aiUrgencyScore, semanticResult.highestLevel)
         } else {
             aiUrgencyScore
         }
 
-        // 4. Rule Matching (database rules)
+        // 5. Rule Matching (database rules)
         val activeRules = ruleDao.getAllRules()
-        val triggeredRule = matchRules(semanticAdjustedScore, text, senderId, activeRules)
-        
-        // Final urgency score after all adjustments
-        val finalUrgencyScore = semanticAdjustedScore
+        val triggeredRule = matchRules(finalUrgencyScore, text, senderId, activeRules)
 
-        // 5. Determine Glyph Pattern based on urgency and rules
+        // 6. Determine Glyph Pattern based on urgency and rules
         val shouldLightUp = triggeredRule != null || finalUrgencyScore >= 4
         val pattern = when {
             finalUrgencyScore >= 5 -> GlyphPattern.URGENT
@@ -64,7 +78,8 @@ class GlyphIntelligenceEngine(
             rawAiResponse = rawAiResponse,
             aiScore = aiUrgencyScore,
             semanticResult = semanticResult,
-            finalScore = finalUrgencyScore
+            finalScore = finalUrgencyScore,
+            aiSkipped = skipAiProcessing
         )
 
         return DecisionResult(
@@ -88,7 +103,8 @@ class GlyphIntelligenceEngine(
         rawAiResponse: String?,
         aiScore: Int,
         semanticResult: SemanticMatchResult,
-        finalScore: Int
+        finalScore: Int,
+        aiSkipped: Boolean = false
     ): String {
         val sb = StringBuilder()
         
@@ -96,7 +112,9 @@ class GlyphIntelligenceEngine(
         if (rawAiResponse != null) {
             sb.appendLine("=== AI Analysis ===")
             sb.appendLine(rawAiResponse)
-            sb.appendLine("AI Urgency Score: $aiScore")
+            if (!aiSkipped) {
+                sb.appendLine("AI Urgency Score: $aiScore")
+            }
             sb.appendLine()
         }
         
@@ -106,12 +124,15 @@ class GlyphIntelligenceEngine(
             semanticResult.matchedKeywords.forEach { keyword ->
                 sb.appendLine("• \"${keyword.text}\" → Level ${keyword.level} (${keyword.category})")
             }
-            sb.appendLine("Semantic Boost: ${semanticResult.highestLevel}")
+            sb.appendLine("Semantic Highest Level: ${semanticResult.highestLevel}")
+            if (aiSkipped) {
+                sb.appendLine("⚡ Instant Priority: Level 6 keyword detected, AI skipped")
+            }
             sb.appendLine()
         }
         
         // Final score
-        if (semanticResult.matched && finalScore != aiScore) {
+        if (semanticResult.matched && finalScore != aiScore && !aiSkipped) {
             sb.appendLine("=== Final Score ===")
             sb.appendLine("Adjusted from $aiScore → $finalScore (semantic boost)")
         }

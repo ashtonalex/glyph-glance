@@ -326,7 +326,32 @@ fun DashboardScreen() {
                                     rule.isIgnored && rule.appName.equals(testSender, ignoreCase = true)
                                 }
                                 
+                                // Step 2: Check semantic and user keywords BEFORE AI
+                                // If urgency 6 is found, skip AI processing entirely
+                                val userKeywords = keywordRules.map { it.keyword }
+                                val semanticResult = semanticMatcher.match(testInput, userKeywords)
+                                
+                                // Calculate priority based on user keyword rules
+                                val basePriority = NotificationPriority.MEDIUM
+                                val ruleBasedPriority = calculatePriority(
+                                    text = testInput,
+                                    appPackage = "com.test.${testSender.lowercase().replace(" ", "")}",
+                                    appName = testSender,
+                                    keywordRules = keywordRules,
+                                    appRules = appRules,
+                                    basePriority = basePriority
+                                )
+                                val rulesMatchedValue = ruleBasedPriority != basePriority
+                                rulesMatched = rulesMatchedValue
+                                val ruleBasedUrgencyScore = if (rulesMatchedValue) ruleBasedPriority.toUrgencyScore() else 0
+                                val semanticUrgencyScore = if (semanticResult.matched) semanticResult.highestLevel else 0
+                                
+                                // Check if we have max urgency (6) from keywords/semantics - skip AI if so
+                                val keywordMaxUrgency = maxOf(ruleBasedUrgencyScore, semanticUrgencyScore)
+                                val skipAiProcessing = isAppIgnored || keywordMaxUrgency >= 6
+                                
                                 val analysisResult: AnalysisResult?
+                                val aiUrgencyScore: Int
                                 
                                 if (isAppIgnored) {
                                     // Skip AI analysis for ignored apps
@@ -336,40 +361,27 @@ fun DashboardScreen() {
                                         triggeredRuleId = null,
                                         rawAiResponse = "[App Ignored - AI analysis skipped]"
                                     )
+                                    aiUrgencyScore = 1
+                                } else if (keywordMaxUrgency >= 6) {
+                                    // Skip AI for max urgency keywords - instant priority
+                                    analysisResult = AnalysisResult(
+                                        urgencyScore = 6,
+                                        sentiment = "URGENT",
+                                        triggeredRuleId = null,
+                                        rawAiResponse = "[Urgency 6 keyword detected - AI analysis skipped for instant priority]"
+                                    )
+                                    aiUrgencyScore = 6
                                 } else {
-                                    // Step 2: Perform sentiment analysis (only for non-ignored apps)
+                                    // Perform AI sentiment analysis
                                     analysisResult = sentimentAnalysisService.analyzeNotification(
                                         content = testInput,
                                         senderId = testSender
                                     )
+                                    aiUrgencyScore = analysisResult?.urgencyScore ?: 3
                                 }
                                 
-                                // Step 3: Calculate priority based on rules
-                                // Pass both package name and app name so app rules can match by either
-                                val ruleBasedPriority = calculatePriority(
-                                    text = testInput,
-                                    appPackage = "com.test.${testSender.lowercase().replace(" ", "")}",
-                                    appName = testSender,
-                                    keywordRules = keywordRules,
-                                    appRules = appRules,
-                                    basePriority = NotificationPriority.MEDIUM // Default base priority for tests
-                                )
-                                
-                                // Step 4: Apply semantic keyword matching from semantic_keywords.json
-                                // User keywords take priority over pre-defined semantics
-                                val userKeywords = keywordRules.map { it.keyword }
-                                val semanticResult = semanticMatcher.match(testInput, userKeywords)
-                                
-                                // Step 5: Determine final urgency score and priority
-                                val basePriority = NotificationPriority.MEDIUM // Default base priority for tests
-                                val aiUrgencyScore = analysisResult?.urgencyScore ?: 3
-                                val rulesMatchedValue = ruleBasedPriority != basePriority
-                                rulesMatched = rulesMatchedValue
-                                val ruleBasedUrgencyScore = if (rulesMatchedValue) ruleBasedPriority.toUrgencyScore() else 0
-                                val semanticUrgencyScore = if (semanticResult.matched) semanticResult.highestLevel else 0
-                                
+                                // Determine final urgency score
                                 val finalUrgencyScoreValue = if (isAppIgnored) {
-                                    // Ignored apps always get urgency 1
                                     1
                                 } else {
                                     // Take maximum of: AI score, rule-based score, and semantic keyword score
@@ -383,11 +395,13 @@ fun DashboardScreen() {
                                 
                                 // Build enhanced raw response with semantic info
                                 val enhancedRawResponse = buildString {
-                                    // AI Response
+                                    // AI Response (or skip message)
                                     analysisResult?.rawAiResponse?.let { 
                                         appendLine("=== AI Analysis ===")
                                         appendLine(it)
-                                        appendLine("AI Urgency Score: $aiUrgencyScore")
+                                        if (!skipAiProcessing) {
+                                            appendLine("AI Urgency Score: $aiUrgencyScore")
+                                        }
                                         appendLine()
                                     }
                                     
@@ -404,7 +418,10 @@ fun DashboardScreen() {
                                     // Final score summary
                                     if (!isAppIgnored && (semanticResult.matched || rulesMatchedValue)) {
                                         appendLine("=== Final Score ===")
-                                        appendLine("AI: $aiUrgencyScore, Rules: ${if (rulesMatchedValue) ruleBasedUrgencyScore else "N/A"}, Semantic: ${if (semanticResult.matched) semanticUrgencyScore else "N/A"}")
+                                        if (skipAiProcessing && keywordMaxUrgency >= 6) {
+                                            appendLine("⚡ Instant Priority: Level 6 keyword detected, AI skipped")
+                                        }
+                                        appendLine("AI: ${if (skipAiProcessing) "skipped" else aiUrgencyScore}, Rules: ${if (rulesMatchedValue) ruleBasedUrgencyScore else "N/A"}, Semantic: ${if (semanticResult.matched) semanticUrgencyScore else "N/A"}")
                                         appendLine("Final (max of all): $finalUrgencyScoreValue")
                                     }
                                 }
