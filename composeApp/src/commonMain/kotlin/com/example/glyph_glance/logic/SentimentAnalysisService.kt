@@ -5,10 +5,6 @@ import com.cactus.ChatMessage
 import com.cactus.CactusCompletionParams
 import com.cactus.CactusInitParams
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Result of sentiment analysis for a notification
@@ -17,7 +13,8 @@ import kotlinx.serialization.json.jsonPrimitive
 data class AnalysisResult(
     val urgencyScore: Int, // 1 (Low) to 5 (Critical)
     val sentiment: String, // "POSITIVE", "NEGATIVE", "NEUTRAL"
-    val triggeredRuleId: Int? = null // Null if no specific rule matched
+    val triggeredRuleId: Int? = null, // Null if no specific rule matched
+    val rawAiResponse: String? = null // Raw response from AI for debugging
 )
 
 /**
@@ -39,21 +36,26 @@ class SentimentAnalysisService {
             val lm = CactusLM()
             
             // Download and initialize Qwen3-0.6B model
-            // Note: downloadModel and initializeModel may return Unit or Boolean
-            // We'll proceed assuming they succeed unless an exception is thrown
-            lm.downloadModel("qwen3-0.6")
-            lm.initializeModel(
+            println("SentimentAnalysisService: Downloading Qwen3-0.6 model...")
+            val downloadResult = lm.downloadModel("qwen3-0.6")
+            println("SentimentAnalysisService: Download result: $downloadResult")
+            
+            println("SentimentAnalysisService: Initializing Qwen3-0.6 model...")
+            val initResult = lm.initializeModel(
                 CactusInitParams(
                     model = "qwen3-0.6",
                     contextSize = 2048
                 )
             )
+            println("SentimentAnalysisService: Initialization result: $initResult")
             
             cactusLM = lm
             isInitialized = true
+            println("SentimentAnalysisService: Qwen3 model initialized successfully")
             true
         } catch (e: Exception) {
-            println("Error initializing Cactus LM: ${e.message}")
+            println("SentimentAnalysisService: Error initializing Cactus LM: ${e.message}")
+            e.printStackTrace()
             false
         }
     }
@@ -79,48 +81,63 @@ class SentimentAnalysisService {
         val lm = cactusLM ?: return getDefaultResult()
         
         return try {
-            // Create system prompt for sentiment and urgency analysis
-            val systemPrompt = """
-                You are a notification analysis system. Analyze the given notification text and determine:
-                1. Urgency level (1-5): 1=Low, 2=Medium-Low, 3=Medium, 4=High, 5=Critical/Emergency
-                2. Sentiment: POSITIVE, NEGATIVE, or NEUTRAL
-                
-                Consider these factors for urgency:
-                - Emergency keywords (urgent, emergency, help, ASAP, now, immediately)
-                - Time-sensitive content (deadline, meeting, appointment)
-                - Emotional intensity (crying, angry, excited)
-                - Question marks and urgency indicators
-                
-                Return ONLY valid JSON in this exact format:
-                {
-                    "urgencyScore": <number 1-5>,
-                    "sentiment": "<POSITIVE|NEGATIVE|NEUTRAL>"
-                }
-            """.trimIndent()
+            // Simplified prompt for faster responses - just need a number
+            // Explicitly state this is a standalone request with no previous context
+            val systemPrompt = "You are an urgency evaluator. Each request is independent with no conversation history. Output ONLY a number 1-5. No explanation."
             
             val userPrompt = """
-                Analyze this notification:
-                From: $senderId
-                Message: $content
+                This is a standalone request. Analyze ONLY this notification and its implied context:
+                
+                Rate urgency 1-5 based on how quickly the message should realistically be addressed:
+                1 = Not urgent  – casual, informational, or can be safely ignored for a long time
+                2 = Slightly urgent – can wait, but should be handled at some point
+                3 = Moderately urgent – should be handled soon, but not immediately
+                4 = Urgent – needs attention as soon as reasonably possible
+                5 = Extremely urgent / critical – needs attention right away (\"drop everything\")
+                
+                When deciding the score, use BOTH the sender/app name and the message content:
+                - WHO is involved: e.g. a boss, important client, or doctor is usually more important than a game or casual friend
+                - TYPE of sender: real people > automated systems > games/ads
+                - SITUATION: emergencies, safety issues, or very time-sensitive coordination (\"come here now\", \"we're starting\", \"I'm in trouble\") are more urgent
+                - CONTEXT examples:
+                  • Boss asking for something soon → higher urgency than a friend saying the same thing casually
+                  • A person telling you to go somewhere soon → higher urgency than a game asking you to log in
+                  • Clear emergency or crisis language → very high urgency
+                
+                Focus on how quickly a reasonable person should respond overall, not just specific keywords.
+                You will receive:
+                - Sender/App name: \"$senderId\"
+                - Message: \"$content\"
+                
+                Analyze them together when deciding the urgency score.
+                
+                Output ONLY the number (1, 2, 3, 4, or 5):
             """.trimIndent()
             
-            // Generate completion
+            println("SentimentAnalysisService: Sending prompt to Qwen3 for message: '$content'")
+            
+            // Generate completion - each call is independent with fresh messages list
+            // Create a completely new messages list to ensure no conversation history
+            val messages = listOf(
+                ChatMessage(role = "system", content = systemPrompt),
+                ChatMessage(role = "user", content = userPrompt)
+            )
+            
             val result = lm.generateCompletion(
-                messages = listOf(
-                    ChatMessage(role = "system", content = systemPrompt),
-                    ChatMessage(role = "user", content = userPrompt)
-                ),
+                messages = messages,
                 params = CactusCompletionParams(
-                    maxTokens = 150,
-                    temperature = 0.3 // Lower temperature for more consistent classification
+                    maxTokens = 400, // Allow for full response including any explanation
+                    temperature = 0.0 // Zero temperature for fastest, most deterministic output
                 )
             )
             
             val responseText = result?.response
-            if (result?.success == true && responseText != null) {
-                parseAnalysisResult(responseText)
+            println("SentimentAnalysisService: Qwen3 response - Success: ${result?.success}, Response: '$responseText'")
+            
+            if (result?.success == true && responseText != null && responseText.isNotEmpty()) {
+                parseUrgencyScore(responseText, responseText) // Pass raw response for debugging
             } else {
-                println("Failed to get analysis result from Cactus")
+                println("SentimentAnalysisService: Failed to get analysis result from Cactus")
                 getDefaultResult()
             }
         } catch (e: Exception) {
@@ -131,61 +148,73 @@ class SentimentAnalysisService {
     }
     
     /**
-     * Parse the JSON response from Qwen into AnalysisResult
+     * Parse urgency score from Qwen3 response
+     * The response should be just a number (1-5), but may include explanation text
      */
-    private fun parseAnalysisResult(response: String): AnalysisResult {
+    private fun parseUrgencyScore(response: String, rawResponse: String): AnalysisResult {
         return try {
-            // Try to extract JSON from the response (Qwen might add extra text)
-            val jsonStart = response.indexOf('{')
-            val jsonEnd = response.lastIndexOf('}') + 1
+            val trimmedResponse = response.trim()
+            println("SentimentAnalysisService: Parsing urgency score from response: '$trimmedResponse'")
             
-            if (jsonStart >= 0 && jsonEnd > jsonStart) {
-                val jsonString = response.substring(jsonStart, jsonEnd)
-                val json = Json { ignoreUnknownKeys = true }
-                val jsonObject = json.parseToJsonElement(jsonString).jsonObject
-                
-                val urgencyScore = jsonObject["urgencyScore"]?.jsonPrimitive?.content?.toIntOrNull() ?: 3
-                val sentiment = jsonObject["sentiment"]?.jsonPrimitive?.content ?: "NEUTRAL"
-                
-                // Validate and clamp values
-                AnalysisResult(
-                    urgencyScore = urgencyScore.coerceIn(1, 5),
-                    sentiment = sentiment.uppercase().takeIf { 
-                        it in listOf("POSITIVE", "NEGATIVE", "NEUTRAL") 
-                    } ?: "NEUTRAL"
-                )
-            } else {
-                // Fallback: try to extract values with regex if JSON parsing fails
-                extractFromText(response)
+            // Strategy 1: Check if response starts with a number 1-5 (most common case)
+            val startsWithNumber = """^([1-5])""".toRegex()
+            val startMatch = startsWithNumber.find(trimmedResponse)
+            if (startMatch != null) {
+                val score = startMatch.groupValues[1].toIntOrNull()?.coerceIn(1, 5)
+                if (score != null) {
+                    return AnalysisResult(
+                        urgencyScore = score,
+                        sentiment = "NEUTRAL",
+                        rawAiResponse = rawResponse
+                    )
+                }
             }
+            
+            // Strategy 2: Find all numbers 1-5 in the response and take the last one (most likely the final answer)
+            val numberRegex = """([1-5])""".toRegex()
+            val allMatches = numberRegex.findAll(trimmedResponse).toList()
+            if (allMatches.isNotEmpty()) {
+                // Take the last match (most likely the final answer after explanation)
+                val lastMatch = allMatches.last()
+                val score = lastMatch.groupValues[1].toIntOrNull()?.coerceIn(1, 5)
+                if (score != null) {
+                    return AnalysisResult(
+                        urgencyScore = score,
+                        sentiment = "NEUTRAL",
+                        rawAiResponse = rawResponse
+                    )
+                }
+            }
+            
+            // Strategy 3: Fallback - find any single digit and clamp it
+            val fallbackRegex = """(\d)""".toRegex()
+            val fallbackMatches = fallbackRegex.findAll(trimmedResponse).toList()
+            if (fallbackMatches.isNotEmpty()) {
+                // Take the last digit found
+                val lastDigit = fallbackMatches.last()
+                val score = lastDigit.groupValues[1].toIntOrNull()?.coerceIn(1, 5)
+                if (score != null) {
+                    return AnalysisResult(
+                        urgencyScore = score,
+                        sentiment = "NEUTRAL",
+                        rawAiResponse = rawResponse
+                    )
+                }
+            }
+            
+            // Strategy 4: Default fallback
+            println("SentimentAnalysisService: WARNING - No number found in response: '$trimmedResponse'")
+            println("SentimentAnalysisService: Using default score: 3")
+            AnalysisResult(
+                urgencyScore = 3,
+                sentiment = "NEUTRAL",
+                rawAiResponse = rawResponse
+            )
         } catch (e: Exception) {
-            println("Error parsing analysis result: ${e.message}")
-            extractFromText(response)
+            println("SentimentAnalysisService: Error parsing urgency score: ${e.message}")
+            e.printStackTrace()
+            getDefaultResult()
         }
-    }
-    
-    /**
-     * Fallback method to extract sentiment/urgency from text if JSON parsing fails
-     */
-    private fun extractFromText(text: String): AnalysisResult {
-        val upperText = text.uppercase()
-        
-        // Extract urgency score
-        val urgencyRegex = """urgencyScore["\s:]*(\d)""".toRegex(RegexOption.IGNORE_CASE)
-        val urgencyMatch = urgencyRegex.find(text)
-        val urgencyScore = urgencyMatch?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(1, 5) ?: 3
-        
-        // Extract sentiment
-        val sentiment = when {
-            upperText.contains("POSITIVE") -> "POSITIVE"
-            upperText.contains("NEGATIVE") -> "NEGATIVE"
-            else -> "NEUTRAL"
-        }
-        
-        return AnalysisResult(
-            urgencyScore = urgencyScore,
-            sentiment = sentiment
-        )
     }
     
     /**
@@ -194,7 +223,8 @@ class SentimentAnalysisService {
     private fun getDefaultResult(): AnalysisResult {
         return AnalysisResult(
             urgencyScore = 3, // Medium urgency
-            sentiment = "NEUTRAL"
+            sentiment = "NEUTRAL",
+            rawAiResponse = null
         )
     }
     
