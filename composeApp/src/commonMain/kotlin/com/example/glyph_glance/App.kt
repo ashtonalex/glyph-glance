@@ -27,10 +27,10 @@ fun App() {
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Transparent, // Let gradient show through
+            containerColor = Color.Black,
             bottomBar = {
                 NavigationBar(
-                    containerColor = SurfaceBlack,
+                    containerColor = Color.Black,
                     contentColor = TextWhite
                 ) {
                     NavigationBarItem(
@@ -91,11 +91,11 @@ fun App() {
 
 @Composable
 fun ThemeBackgroundGradient() {
-    // Simple solid dark grey background
+    // Simple solid black background
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(SurfaceBlack)
+            .background(Color.Black)
     )
 }
 
