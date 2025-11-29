@@ -35,6 +35,7 @@ kotlin {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.datastore.preferences)
+
             implementation(libs.kotlinx.coroutines.android)
             implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
         }
