@@ -8,9 +8,6 @@ import com.example.glyph_glance.service.LiveLogger
 import kotlinx.serialization.json.Json
 
 class CactusManager {
-    
-    // Toggle this to FALSE when testing on a real device with the model downloaded
-    private val USE_MOCK = false // Set to true to avoid Cactus SDK initialization issues during development
 
     private val cactusLM = CactusLM()
     private val modelSlug = "qwen3-0.6"
@@ -18,12 +15,7 @@ class CactusManager {
     private var isModelDownloaded = false
 
     suspend fun initialize() {
-        LiveLogger.addLog("CACTUS: Initialization started (USE_MOCK=$USE_MOCK)")
-        
-        if (USE_MOCK) {
-            LiveLogger.addLog("CACTUS: Running in MOCK mode - skipping model download/initialization")
-            return
-        }
+        LiveLogger.addLog("CACTUS: Initialization started")
         
         try {
             // Step 1: Download model
@@ -67,19 +59,12 @@ class CactusManager {
     }
 
     suspend fun analyzeText(text: String, historyContext: String?): AIResult {
-        if (USE_MOCK) {
-            LiveLogger.addLog("CACTUS: analyzeText() called - using MOCK mode")
-            val mockResult = mockAnalysis(text)
-            LiveLogger.addLog("CACTUS: MOCK result - urgency=${mockResult.urgencyScore}, sentiment=${mockResult.sentiment}")
-            return mockResult
-        }
-        
         if (!isInitialized) {
             LiveLogger.addLog("CACTUS: WARNING - analyzeText() called but model not initialized, using fallback")
             return AIResult(1, "NEUTRAL")
         }
         
-        LiveLogger.addLog("CACTUS: analyzeText() called - using REAL LLM mode")
+        LiveLogger.addLog("CACTUS: analyzeText() called - using LLM")
         LiveLogger.addLog("CACTUS: Input text: ${text.take(100)}${if (text.length > 100) "..." else ""}")
         
         val prompt = "Analyze the urgency (1-5) and sentiment (POSITIVE, NEGATIVE, NEUTRAL) of this text. Return ONLY JSON: {\"urgencyScore\": <int>, \"sentiment\": <string>}. Text: $text"
@@ -120,11 +105,6 @@ class CactusManager {
     }
     
     suspend fun translateRule(userInput: String): String {
-        if (USE_MOCK) {
-            LiveLogger.addLog("CACTUS: translateRule() called - using MOCK mode, returning empty JSON")
-            return "{}"
-        }
-        
         if (!isInitialized) {
             LiveLogger.addLog("CACTUS: WARNING - translateRule() called but model not initialized, returning empty JSON")
             return "{}"
@@ -148,13 +128,6 @@ class CactusManager {
             return "{}"
         }
     }
-
-    private fun mockAnalysis(text: String): AIResult {
-        // Simple logic for testing without model
-        val urgency = if (text.contains("urgent", ignoreCase = true)) 5 else 1
-        val sentiment = if (text.contains("happy", ignoreCase = true)) "POSITIVE" else "NEUTRAL"
-        return AIResult(urgency, sentiment)
-    }
     
     /**
      * Get the current status of Cactus initialization.
@@ -162,7 +135,6 @@ class CactusManager {
      */
     fun getStatus(): CactusStatus {
         return CactusStatus(
-            useMock = USE_MOCK,
             isInitialized = isInitialized,
             isModelDownloaded = isModelDownloaded,
             modelSlug = modelSlug
@@ -196,11 +168,10 @@ data class AIResult(val urgencyScore: Int, val sentiment: String)
  * Status information about Cactus initialization and readiness.
  */
 data class CactusStatus(
-    val useMock: Boolean,
     val isInitialized: Boolean,
     val isModelDownloaded: Boolean,
     val modelSlug: String
 ) {
     val isReady: Boolean
-        get() = !useMock && isInitialized && isModelDownloaded
+        get() = isInitialized && isModelDownloaded
 }

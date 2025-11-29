@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.example.glyph_glance.di.AppModule
 import com.example.glyph_glance.logic.GlyphPattern
+import com.example.glyph_glance.service.LiveLogger
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

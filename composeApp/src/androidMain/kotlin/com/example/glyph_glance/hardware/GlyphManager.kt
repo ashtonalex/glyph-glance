@@ -33,11 +33,12 @@ class GlyphManager(private val context: Context) {
 
             // Real Hardware Logic (when Nothing SDK is available)
             when (pattern) {
-                GlyphPattern.URGENT -> playStrobeRed()
+                GlyphPattern.HIGH_STROBE -> playStrobeRed()
+                GlyphPattern.MEDIUM_PULSE -> playPulseMedium()
+                GlyphPattern.LOW_SUBTLE -> playSubtleGlow()
                 GlyphPattern.AMBER_BREATHE -> playBreatheAmber()
-                GlyphPattern.NONE -> {
-                    // Do nothing
-                }
+                GlyphPattern.POSITIVE_GLOW -> playPositiveGlow()
+                GlyphPattern.NONE -> { /* Do nothing */ }
             }
             clearMatrix()
         } catch (e: Exception) {
@@ -92,6 +93,40 @@ class GlyphManager(private val context: Context) {
             .build()
         glyphManager.display(frame)
         */
+    }
+
+    /**
+     * Play a medium pulsing pattern for medium priority notifications.
+     */
+    private fun playPulseMedium() {
+        LiveLogger.addLog("GLYPH: Playing MEDIUM PULSE pattern")
+        
+        // When Nothing SDK is available, implement moderate pulsing effect
+    }
+
+    /**
+     * Play a subtle glow pattern for low priority notifications.
+     */
+    private fun playSubtleGlow() {
+        LiveLogger.addLog("GLYPH: Playing LOW SUBTLE pattern")
+        
+        // When Nothing SDK is available, implement gentle single-channel glow
+    }
+
+    /**
+     * Play a positive glow pattern for positive sentiment notifications.
+     */
+    private fun playPositiveGlow() {
+        LiveLogger.addLog("GLYPH: Playing POSITIVE GLOW pattern")
+        
+        // When Nothing SDK is available, implement gentle warm glow
+    }
+
+    /**
+     * Clear the glyph matrix/display.
+     */
+    private fun clearMatrix() {
+        // When Nothing SDK is available, clear the display
     }
 }
 

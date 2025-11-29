@@ -165,7 +165,7 @@ fun RulesScreen(
                 // Helper text when no repository
                 if (rulesRepository == null) {
                     Text(
-                        text = "Rules engine not available - using mock mode",
+                        text = "Rules engine not available",
                         color = Color(0xFFFFAA00),
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 8.dp)
