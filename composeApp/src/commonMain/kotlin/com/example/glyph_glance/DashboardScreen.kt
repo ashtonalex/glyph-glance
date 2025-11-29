@@ -47,8 +47,10 @@ import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.models.UserProfile
 import com.example.glyph_glance.data.models.Notification as DbNotification
 import com.example.glyph_glance.logic.AnalysisResult
+import com.example.glyph_glance.logic.SemanticMatcher
 import com.example.glyph_glance.logic.SentimentAnalysisService
 import com.example.glyph_glance.logic.calculatePriority
+import com.example.glyph_glance.logic.getSemanticKeywordsJson
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -108,6 +110,8 @@ fun DashboardScreen() {
     
     // Sentiment Analysis Test state
     val sentimentAnalysisService = remember { SentimentAnalysisService() }
+    val semanticMatcher = remember { SemanticMatcher() }
+    var semanticsLoaded by remember { mutableStateOf(false) }
     var testExpanded by remember { mutableStateOf(false) }
     var testInput by remember { mutableStateOf("") }
     var testSender by remember { mutableStateOf("Test App") }
@@ -210,6 +214,18 @@ fun DashboardScreen() {
         keywords = prefsManager.getKeywordRules()
         appRules = prefsManager.getAppRules()
         developerMode = prefsManager.getDeveloperMode()
+    }
+    
+    // Load semantic keywords from embedded JSON
+    LaunchedEffect(Unit) {
+        try {
+            val jsonString = getSemanticKeywordsJson()
+            semanticsLoaded = semanticMatcher.loadFromJson(jsonString)
+            println("DashboardScreen: Semantic keywords loaded: $semanticsLoaded")
+        } catch (e: Exception) {
+            println("DashboardScreen: Error loading semantic keywords: ${e.message}")
+            e.printStackTrace()
+        }
     }
     
     // Filter and sort notifications
@@ -327,7 +343,6 @@ fun DashboardScreen() {
                                         senderId = testSender
                                     )
                                 }
-                                testResult = analysisResult
                                 
                                 // Step 3: Calculate priority based on rules
                                 // Pass both package name and app name so app rules can match by either
@@ -340,29 +355,68 @@ fun DashboardScreen() {
                                     basePriority = NotificationPriority.MEDIUM // Default base priority for tests
                                 )
                                 
-                                // Step 4: Determine final urgency score and priority
+                                // Step 4: Apply semantic keyword matching from semantic_keywords.json
+                                // User keywords take priority over pre-defined semantics
+                                val userKeywords = keywordRules.map { it.keyword }
+                                val semanticResult = semanticMatcher.match(testInput, userKeywords)
+                                
+                                // Step 5: Determine final urgency score and priority
                                 val basePriority = NotificationPriority.MEDIUM // Default base priority for tests
                                 val aiUrgencyScore = analysisResult?.urgencyScore ?: 3
                                 val rulesMatchedValue = ruleBasedPriority != basePriority
                                 rulesMatched = rulesMatchedValue
+                                val ruleBasedUrgencyScore = if (rulesMatchedValue) ruleBasedPriority.toUrgencyScore() else 0
+                                val semanticUrgencyScore = if (semanticResult.matched) semanticResult.highestLevel else 0
                                 
                                 val finalUrgencyScoreValue = if (isAppIgnored) {
                                     // Ignored apps always get urgency 1
                                     1
-                                } else if (rulesMatchedValue) {
-                                    // If rules matched, use the maximum of AI score and rule-based score
-                                    // This ensures AI score is never lowered, but rules can increase it
-                                    val ruleBasedUrgencyScore = ruleBasedPriority.toUrgencyScore()
-                                    maxOf(aiUrgencyScore, ruleBasedUrgencyScore)
                                 } else {
-                                    // If no rules matched, use AI urgency score directly
-                                    aiUrgencyScore
+                                    // Take maximum of: AI score, rule-based score, and semantic keyword score
+                                    maxOf(aiUrgencyScore, ruleBasedUrgencyScore, semanticUrgencyScore)
                                 }
                                 finalUrgencyScore = finalUrgencyScoreValue
                                 
                                 // Final priority should match the final urgency score
                                 val finalPriorityFromUrgency = NotificationPriority.fromUrgencyScore(finalUrgencyScoreValue)
                                 calculatedPriority = finalPriorityFromUrgency
+                                
+                                // Build enhanced raw response with semantic info
+                                val enhancedRawResponse = buildString {
+                                    // AI Response
+                                    analysisResult?.rawAiResponse?.let { 
+                                        appendLine("=== AI Analysis ===")
+                                        appendLine(it)
+                                        appendLine("AI Urgency Score: $aiUrgencyScore")
+                                        appendLine()
+                                    }
+                                    
+                                    // Semantic matches
+                                    if (semanticResult.matched) {
+                                        appendLine("=== Semantic Keywords Matched ===")
+                                        semanticResult.matchedKeywords.forEach { keyword ->
+                                            appendLine("• \"${keyword.text}\" → Level ${keyword.level} (${keyword.category})")
+                                        }
+                                        appendLine("Semantic Highest Level: ${semanticResult.highestLevel}")
+                                        appendLine()
+                                    }
+                                    
+                                    // Final score summary
+                                    if (!isAppIgnored && (semanticResult.matched || rulesMatchedValue)) {
+                                        appendLine("=== Final Score ===")
+                                        appendLine("AI: $aiUrgencyScore, Rules: ${if (rulesMatchedValue) ruleBasedUrgencyScore else "N/A"}, Semantic: ${if (semanticResult.matched) semanticUrgencyScore else "N/A"}")
+                                        appendLine("Final (max of all): $finalUrgencyScoreValue")
+                                    }
+                                }
+                                
+                                // Update testResult with enhanced response for display
+                                val enhancedAnalysisResult = AnalysisResult(
+                                    urgencyScore = finalUrgencyScoreValue,
+                                    sentiment = analysisResult?.sentiment ?: "NEUTRAL",
+                                    triggeredRuleId = analysisResult?.triggeredRuleId,
+                                    rawAiResponse = if (enhancedRawResponse.isNotBlank()) enhancedRawResponse.trim() else analysisResult?.rawAiResponse
+                                )
+                                testResult = enhancedAnalysisResult
                                 
                                 val testNotification = ActivityNotification(
                                     id = 0, // Test notifications don't have database IDs
@@ -374,7 +428,7 @@ fun DashboardScreen() {
                                     icon = getIconForApp(testSender),
                                     sentiment = analysisResult?.sentiment,
                                     urgencyScore = finalUrgencyScoreValue,
-                                    rawAiResponse = analysisResult?.rawAiResponse
+                                    rawAiResponse = enhancedAnalysisResult.rawAiResponse
                                 )
                                 
                                 // Add to the beginning of the list
@@ -615,40 +669,40 @@ fun DashboardScreen() {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
-                                .padding(bottom = 16.dp)
+                                .padding(bottom = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            filteredNotifications.forEachIndexed { index, notification ->
-                                val importanceColor = when (notification.priority) {
-                                    NotificationPriority.HIGH -> themeColors.highPriority
-                                    NotificationPriority.MEDIUM -> themeColors.mediumPriority
-                                    NotificationPriority.LOW -> themeColors.lowPriority
-                                }
-                                AnimatedDeleteWrapper(
-                                    onDelete = {
-                                        if (notification.id > 0 && notificationRepository != null) {
-                                            coroutineScope.launch {
-                                                notificationRepository.deleteNotification(notification.id)
+                            filteredNotifications.forEach { notification ->
+                                key(notification.id) {
+                                    val importanceColor = when (notification.priority) {
+                                        NotificationPriority.HIGH -> themeColors.highPriority
+                                        NotificationPriority.MEDIUM -> themeColors.mediumPriority
+                                        NotificationPriority.LOW -> themeColors.lowPriority
+                                    }
+                                    AnimatedDeleteWrapper(
+                                        onDelete = {
+                                            if (notification.id > 0 && notificationRepository != null) {
+                                                coroutineScope.launch {
+                                                    notificationRepository.deleteNotification(notification.id)
+                                                }
                                             }
                                         }
+                                    ) { deleteHandler ->
+                                        NotificationItem(
+                                            title = notification.title,
+                                            message = notification.message,
+                                            time = notification.time,
+                                            importanceColor = importanceColor,
+                                            icon = notification.icon,
+                                            sentiment = notification.sentiment,
+                                            urgencyScore = notification.urgencyScore,
+                                            onDelete = deleteHandler,
+                                            onClick = {
+                                                selectedNotification = notification
+                                                showNotificationDetails = true
+                                            }
+                                        )
                                     }
-                                ) { deleteHandler ->
-                                    NotificationItem(
-                                        title = notification.title,
-                                        message = notification.message,
-                                        time = notification.time,
-                                        importanceColor = importanceColor,
-                                        icon = notification.icon,
-                                        sentiment = notification.sentiment,
-                                        urgencyScore = notification.urgencyScore,
-                                        onDelete = deleteHandler,
-                                        onClick = {
-                                            selectedNotification = notification
-                                            showNotificationDetails = true
-                                        }
-                                    )
-                                }
-                                if (index < filteredNotifications.size - 1) {
-                                    Spacer(modifier = Modifier.height(8.dp))
                                 }
                             }
                         }
@@ -1053,34 +1107,30 @@ private fun AnimatedDeleteWrapper(
     var isVisible by remember { mutableStateOf(true) }
     val coroutineScope = rememberCoroutineScope()
     
-    val transition = updateTransition(targetState = isVisible, label = "delete")
-    val alpha by transition.animateFloat(
-        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
-        label = "alpha"
-    ) { if (it) 1f else 0f }
-    val scale by transition.animateFloat(
-        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
-        label = "scale"
-    ) { if (it) 1f else 0.7f }
-    val offsetX by transition.animateDp(
-        transitionSpec = { tween(300, easing = FastOutSlowInEasing) },
-        label = "offsetX"
-    ) { if (it) 0.dp else (-400).dp }
-    
-    Box(
-        modifier = Modifier
-            .alpha(alpha)
-            .scale(scale)
-            .offset(x = offsetX)
+    // Use AnimatedVisibility for smooth height collapse
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = EnterTransition.None,
+        exit = shrinkVertically(
+            animationSpec = tween(250, easing = FastOutSlowInEasing),
+            shrinkTowards = Alignment.Top
+        ) + fadeOut(
+            animationSpec = tween(200, easing = FastOutSlowInEasing)
+        ) + slideOutHorizontally(
+            animationSpec = tween(250, easing = FastOutSlowInEasing),
+            targetOffsetX = { -it }
+        )
     ) {
-        val deleteHandler: () -> Unit = {
-            isVisible = false
-            coroutineScope.launch {
-                kotlinx.coroutines.delay(300) // Wait for animation to complete
-                onDelete()
+        Box {
+            val deleteHandler: () -> Unit = {
+                isVisible = false
+                coroutineScope.launch {
+                    kotlinx.coroutines.delay(300) // Wait for animation to complete
+                    onDelete()
+                }
             }
+            content(deleteHandler)
         }
-        content(deleteHandler)
     }
 }
 
@@ -1166,7 +1216,8 @@ fun KeywordsSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (keywords.isEmpty()) {
                         Text(
@@ -1176,17 +1227,16 @@ fun KeywordsSection(
                             modifier = Modifier.padding(vertical = 16.dp)
                         )
                     } else {
-                        keywords.forEachIndexed { index, rule ->
-                            AnimatedDeleteWrapper(
-                                onDelete = { onDelete(rule) }
-                            ) { deleteHandler ->
-                                KeywordRuleItem(
-                                    rule = rule,
-                                    onDelete = deleteHandler
-                                )
-                            }
-                            if (index < keywords.size - 1) {
-                                Spacer(modifier = Modifier.height(8.dp))
+                        keywords.forEach { rule ->
+                            key(rule.keyword) {
+                                AnimatedDeleteWrapper(
+                                    onDelete = { onDelete(rule) }
+                                ) { deleteHandler ->
+                                    KeywordRuleItem(
+                                        rule = rule,
+                                        onDelete = deleteHandler
+                                    )
+                                }
                             }
                         }
                     }
@@ -1278,7 +1328,8 @@ fun AppsSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
-                        .padding(bottom = 16.dp)
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (appRules.isEmpty()) {
                         Text(
@@ -1288,17 +1339,16 @@ fun AppsSection(
                             modifier = Modifier.padding(vertical = 16.dp)
                         )
                     } else {
-                        appRules.forEachIndexed { index, rule ->
-                            AnimatedDeleteWrapper(
-                                onDelete = { onDelete(rule) }
-                            ) { deleteHandler ->
-                                AppRuleItem(
-                                    rule = rule,
-                                    onDelete = deleteHandler
-                                )
-                            }
-                            if (index < appRules.size - 1) {
-                                Spacer(modifier = Modifier.height(8.dp))
+                        appRules.forEach { rule ->
+                            key(rule.packageName) {
+                                AnimatedDeleteWrapper(
+                                    onDelete = { onDelete(rule) }
+                                ) { deleteHandler ->
+                                    AppRuleItem(
+                                        rule = rule,
+                                        onDelete = deleteHandler
+                                    )
+                                }
                             }
                         }
                     }
