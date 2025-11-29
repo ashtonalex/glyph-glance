@@ -11,6 +11,7 @@ import com.example.glyph_glance.logic.IntelligenceEngine
 import com.example.glyph_glance.logic.MockIntelligenceEngine
 import com.example.glyph_glance.logic.RulesRepository
 import com.example.glyph_glance.service.BufferEngine
+import com.example.glyph_glance.service.LiveLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -41,13 +42,22 @@ object AppModule {
         }
 
         if (cactusManager == null) {
+            LiveLogger.addLog("AppModule: Creating CactusManager instance")
             cactusManager = CactusManager()
             // Initialize model download in background (only if not using mock)
             CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    LiveLogger.addLog("AppModule: Starting CactusManager initialization in background")
                     cactusManager?.initialize()
+                    
+                    // Log status after initialization
+                    val status = cactusManager?.getStatus()
+                    if (status != null) {
+                        LiveLogger.addLog("AppModule: Cactus status - Mock=${status.useMock}, Initialized=${status.isInitialized}, Downloaded=${status.isModelDownloaded}, Ready=${status.isReady}")
+                    }
                 } catch (e: Exception) {
                     android.util.Log.e("AppModule", "Failed to initialize CactusManager", e)
+                    LiveLogger.addLog("AppModule: ERROR - Failed to initialize CactusManager: ${e.message}")
                     // Continue with mock mode
                 }
             }

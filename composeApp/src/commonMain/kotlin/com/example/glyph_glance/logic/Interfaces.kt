@@ -16,11 +16,17 @@ interface RulesRepository {
 
 data class DecisionResult(
     val shouldLightUp: Boolean,
-    val pattern: GlyphPattern // Enum: RED_STROBE, AMBER_BREATHE, NONE
+    val pattern: GlyphPattern
 )
 
+/**
+ * Glyph light patterns mapped to notification priority levels and sentiment.
+ */
 enum class GlyphPattern {
-    URGENT,
-    AMBER_BREATHE,
-    NONE
+    HIGH_STROBE,      // Aggressive all-channel strobe (urgent/high priority)
+    MEDIUM_PULSE,     // Moderate pulsing effect (medium priority)
+    LOW_SUBTLE,       // Gentle single-channel glow (low priority)
+    AMBER_BREATHE,    // Breathing animation pattern (negative sentiment)
+    POSITIVE_GLOW,    // Gentle warm glow (positive sentiment)
+    NONE              // Off
 }

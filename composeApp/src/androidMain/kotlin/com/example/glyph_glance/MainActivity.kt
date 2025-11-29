@@ -16,9 +16,12 @@ class MainActivity : ComponentActivity() {
         
         try {
             // Initialize Cactus SDK
+            LiveLogger.addLog("MainActivity: Initializing Cactus SDK context")
             com.cactus.CactusContextInitializer.initialize(this)
+            LiveLogger.addLog("MainActivity: Cactus SDK context initialized successfully")
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Failed to initialize Cactus SDK", e)
+            LiveLogger.addLog("MainActivity: ERROR - Failed to initialize Cactus SDK context: ${e.message}")
             // Continue anyway - will use mock mode
         }
         
