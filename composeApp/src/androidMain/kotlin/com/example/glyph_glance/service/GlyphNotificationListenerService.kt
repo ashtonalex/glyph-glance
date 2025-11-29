@@ -95,12 +95,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         
         val basePriority = NotificationPriority.fromImportance(importance)
         
-        // Log buffer queue activity
-        LiveLogger.logBufferQueue(
-            senderId = appName,
-            action = "Added to processing queue",
-            queueSize = 1
-        )
+        // Log buffer queue activity - MOVED to GlyphIntelligenceEngine for accuracy
+        // LiveLogger.incrementQueuing() handles the UI spinner state
+        LiveLogger.incrementQueuing()
         
         // Process notification through GlyphIntelligenceEngine
         serviceScope.launch {
@@ -147,17 +144,31 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     
                     repository.insertNotification(notificationModel)
                     LiveLogger.logGlyphInteraction("NONE", false) // No glyph for ignored apps
+                    LiveLogger.decrementQueuing()
                     return@launch
                 }
-                
-                // Set processing state for UI feedback
-                LiveLogger.setProcessingNotification(true)
                 
                 // Extract keyword strings for semantic exclusion
                 // User keywords take priority over pre-defined semantics
                 val userKeywords = keywordRules.map { it.keyword }
                 
-                // Check user keyword rules FIRST - if urgency 6 found, skip AI
+
+                // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
+                // This will wait for the 5-second buffering window
+                val decision = intelligenceEngine.processNotification(fullText, appName, userKeywords)
+                
+                // If notification was buffered (superseded by a newer one), stop processing here
+                if (decision.isBuffered) {
+                    Log.d(TAG, "Notification buffered/superseded: $title from $appName - Skipping save/notify")
+                    // Decrement queuing counter for buffered notification
+                    LiveLogger.decrementQueuing()
+                    return@launch
+                }
+                
+                // Now that buffering is complete, transition from "Queuing" to "Thinking"
+                LiveLogger.decrementQueuing()
+                LiveLogger.setProcessingNotification(true)
+
                 val preferencePriority = calculatePriority(
                     text = fullText,
                     appPackage = sbn.packageName,
@@ -236,6 +247,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing notification", e)
                 LiveLogger.logError("NotificationListener", e.message ?: "Error processing notification")
+                LiveLogger.decrementQueuing() // Ensure we decrement on error (in case it wasn't already)
                 LiveLogger.setProcessingNotification(false)
                 
                 // Save with fallback priority if processing fails
