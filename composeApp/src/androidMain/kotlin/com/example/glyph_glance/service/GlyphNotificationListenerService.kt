@@ -27,6 +27,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     private lateinit var repository: NotificationRepositoryImpl
     private lateinit var preferencesManager: AndroidPreferencesManager
     private lateinit var intelligenceEngine: GlyphIntelligenceEngine
+    private lateinit var glyphManager: GlyphManager
     
     override fun onCreate() {
         super.onCreate()
@@ -47,11 +48,15 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         repository = NotificationRepositoryImpl(notificationDatabase.notificationDao())
         preferencesManager = AndroidPreferencesManager(applicationContext)
         
+        // Initialize GlyphManager
+        glyphManager = GlyphManager.getInstance(applicationContext)
+        glyphManager.initialize()
+        
         // Log service start
         LiveLogger.setServiceRunning(true)
         LiveLogger.setNotificationAccessEnabled(true)
         
-        Log.d(TAG, "Notification Listener Service Created with GlyphIntelligenceEngine")
+        Log.d(TAG, "Notification Listener Service Created with GlyphIntelligenceEngine and GlyphManager")
     }
     
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -241,15 +246,15 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         // Log glyph interaction
         LiveLogger.logGlyphInteraction(pattern.name, pattern != GlyphPattern.NONE)
         
-        // TODO: Implement actual glyph light control based on pattern
+        // Flash glyph 3 times whenever a message is flagged (any pattern except NONE)
         when (pattern) {
             GlyphPattern.URGENT -> {
-                Log.d(TAG, "Triggering URGENT glyph pattern")
-                // Trigger urgent/strobe pattern
+                Log.d(TAG, "Triggering URGENT glyph pattern - flashing 3 times")
+                glyphManager.flashThreeTimes()
             }
             GlyphPattern.AMBER_BREATHE -> {
-                Log.d(TAG, "Triggering AMBER_BREATHE glyph pattern")
-                // Trigger amber breathing pattern
+                Log.d(TAG, "Triggering AMBER_BREATHE glyph pattern - flashing 3 times")
+                glyphManager.flashThreeTimes()
             }
             GlyphPattern.NONE -> {
                 // No pattern needed
@@ -265,6 +270,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     override fun onDestroy() {
         super.onDestroy()
         notificationDatabase.close()
+        
+        // Cleanup GlyphManager
+        glyphManager.cleanup()
         
         // Log service stop
         LiveLogger.setServiceRunning(false)

@@ -23,9 +23,26 @@ import org.jetbrains.compose.ui.tooling.preview.Preview
 @Preview
 fun App() {
     GlyphTheme {
+        val hasNotificationPermission = rememberHasNotificationPermission()
+        val hasNotificationService = rememberHasNotificationService()
+        val allPermissionsGranted = hasNotificationPermission && hasNotificationService
+        
         var currentScreen by remember { mutableStateOf(Screen.Dashboard) }
 
-        Scaffold(
+        // Show permission screen if permissions are not granted
+        if (!allPermissionsGranted) {
+            PermissionScreen(
+                onNotificationPermissionClick = {
+                    openNotificationPermissionSettings()
+                },
+                onNotificationServiceClick = {
+                    openNotificationServiceSettings()
+                },
+                hasNotificationPermission = hasNotificationPermission,
+                hasNotificationService = hasNotificationService
+            )
+        } else {
+            Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color.Black,
             bottomBar = {
@@ -85,6 +102,7 @@ fun App() {
                     Screen.ActivityLogs -> ActivityLogsScreen()
                 }
             }
+        }
         }
     }
 }
