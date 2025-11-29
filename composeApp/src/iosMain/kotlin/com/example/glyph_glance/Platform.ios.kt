@@ -1,5 +1,9 @@
 package com.example.glyph_glance
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import com.example.glyph_glance.data.preferences.InMemoryPreferencesManager
+import com.example.glyph_glance.data.preferences.PreferencesManager
 import platform.UIKit.UIDevice
 
 class IOSPlatform: Platform {
@@ -7,3 +11,8 @@ class IOSPlatform: Platform {
 }
 
 actual fun getPlatform(): Platform = IOSPlatform()
+
+@Composable
+actual fun rememberPreferencesManager(): PreferencesManager {
+    return remember { InMemoryPreferencesManager() }
+}

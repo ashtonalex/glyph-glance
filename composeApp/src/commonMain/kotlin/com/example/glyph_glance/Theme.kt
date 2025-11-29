@@ -3,34 +3,95 @@ package com.example.glyph_glance
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.Color
+import com.example.glyph_glance.data.models.LedTheme
+import com.example.glyph_glance.data.models.NotificationPriority
 
-private val DarkColorScheme = darkColorScheme(
-    primary = NeonBlue,
-    secondary = NeonPurple,
-    tertiary = NeonGreen,
-    background = DarkBackground,
-    surface = SurfaceBlack,
-    onPrimary = TextWhite,
-    onSecondary = TextWhite,
-    onTertiary = TextWhite,
-    onBackground = TextWhite,
-    onSurface = TextWhite,
-)
+// Theme colors that can be dynamically changed
+data class ThemeColors(
+    val highPriority: Color,
+    val mediumPriority: Color,
+    val lowPriority: Color
+) {
+    companion object {
+        val Default = ThemeColors(
+            highPriority = NeonRed,
+            mediumPriority = NeonBlue,
+            lowPriority = NeonGreen
+        )
+    }
+}
+
+// CompositionLocal to provide theme colors throughout the app
+val LocalThemeColors = compositionLocalOf { ThemeColors.Default }
 
 @Composable
 fun GlyphTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(), // Force dark theme by default for this aesthetic?
-    // Dynamic color is available on Android 12+
+    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    // For this specific "Dark/Neon" aesthetic, we might want to enforce dark mode
-    // or at least default to it.
-    val colorScheme = DarkColorScheme
-
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = MaterialTheme.typography, // We can customize this later if needed
-        content = content
+    val prefsManager = rememberPreferencesManager()
+    var ledTheme by remember { mutableStateOf(LedTheme()) }
+    
+    // Load theme on initialization
+    LaunchedEffect(Unit) {
+        ledTheme = prefsManager.getLedTheme()
+    }
+    
+    // Reload theme periodically to catch changes when presets are selected
+    // This ensures theme updates across all screens when a preset is applied
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(100) // Small delay to let initial load complete
+        while (true) {
+            kotlinx.coroutines.delay(200) // Check every 200ms for theme changes (faster response)
+            val newTheme = prefsManager.getLedTheme()
+            // Use string comparison to detect any changes
+            if (newTheme.highPriorityColor != ledTheme.highPriorityColor ||
+                newTheme.mediumPriorityColor != ledTheme.mediumPriorityColor ||
+                newTheme.lowPriorityColor != ledTheme.lowPriorityColor) {
+                ledTheme = newTheme
+            }
+        }
+    }
+    
+    // Create theme colors from LED theme - don't use remember to ensure recomposition
+    val themeColors = ThemeColors(
+        highPriority = ledTheme.getColorForPriority(NotificationPriority.HIGH),
+        mediumPriority = ledTheme.getColorForPriority(NotificationPriority.MEDIUM),
+        lowPriority = ledTheme.getColorForPriority(NotificationPriority.LOW)
     )
+    
+    val colorScheme = remember(themeColors.highPriority, themeColors.mediumPriority, themeColors.lowPriority) {
+        darkColorScheme(
+            primary = themeColors.mediumPriority,
+            secondary = NeonPurple,
+            tertiary = themeColors.lowPriority,
+            background = DarkBackground,
+            surface = SurfaceBlack,
+            onPrimary = TextWhite,
+            onSecondary = TextWhite,
+            onTertiary = TextWhite,
+            onBackground = TextWhite,
+            onSurface = TextWhite,
+        )
+    }
+
+    CompositionLocalProvider(LocalThemeColors provides themeColors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = MaterialTheme.typography,
+            content = content
+        )
+    }
 }
+
+// Helper functions to get theme colors
+@Composable
+fun getThemeHighPriority(): Color = LocalThemeColors.current.highPriority
+
+@Composable
+fun getThemeMediumPriority(): Color = LocalThemeColors.current.mediumPriority
+
+@Composable
+fun getThemeLowPriority(): Color = LocalThemeColors.current.lowPriority
