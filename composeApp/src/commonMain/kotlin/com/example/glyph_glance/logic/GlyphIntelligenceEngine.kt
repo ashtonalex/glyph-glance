@@ -157,11 +157,13 @@ class GlyphIntelligenceEngine(
         val triggeredRule = matchRules(text, senderId, activeRules)
 
         // 6. Determine Glyph Pattern based on urgency and rules
-        val shouldLightUp = triggeredRule != null || finalUrgencyScore >= 4
+        // Only flash for critical notifications (urgency 5-6) or triggered rules
+        val shouldLightUp = finalUrgencyScore >= 5 || (triggeredRule != null && finalUrgencyScore >= 4)
         val pattern = when {
-            finalUrgencyScore >= 5 -> GlyphPattern.URGENT
-            finalUrgencyScore >= 4 || triggeredRule != null -> GlyphPattern.AMBER_BREATHE
-            else -> GlyphPattern.NONE
+            finalUrgencyScore >= 6 -> GlyphPattern.URGENT  // Critical: maximum urgency
+            finalUrgencyScore >= 5 -> GlyphPattern.URGENT  // Urgent: high priority
+            triggeredRule != null && finalUrgencyScore >= 4 -> GlyphPattern.AMBER_BREATHE
+            else -> GlyphPattern.NONE  // No flash for urgency 1-4 without matching rules
         }
         
         // Build enhanced raw response with semantic match info

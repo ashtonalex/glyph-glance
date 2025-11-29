@@ -164,35 +164,34 @@ class GlyphManager private constructor(private val context: Context) {
      * Trigger flash from UI based on urgency score.
      * Different urgency levels get different flash patterns.
      */
+    /**
+     * Trigger flash from UI based on urgency score.
+     * Only flashes for critical notifications (urgency 5-6).
+     * Lower urgency notifications should NOT trigger the glyph.
+     */
     fun flashForUrgency(urgencyScore: Int) {
         pendingFlashUrgency = null // Clear pending
+        
+        // Only flash for critical/urgent notifications (urgency 5+)
+        if (urgencyScore < 5) {
+            Log.d(TAG, "Flash skipped - urgency $urgencyScore is below threshold (requires 5+)")
+            return
+        }
         
         Log.d(TAG, "Flashing for urgency: $urgencyScore")
         
         when {
             urgencyScore >= 6 -> {
-                // Critical: 5 rapid flashes
+                // Critical: 5 rapid flashes - maximum alert
                 flashTimes(5, flashDuration = 150L, interval = 100L, brightness = 255)
             }
             urgencyScore >= 5 -> {
-                // Urgent: 4 flashes
-                flashTimes(4, flashDuration = 180L, interval = 120L, brightness = 255)
-            }
-            urgencyScore >= 4 -> {
-                // High: 3 flashes
-                flashTimes(3, flashDuration = 200L, interval = 150L, brightness = 230)
-            }
-            urgencyScore >= 3 -> {
-                // Medium: 2 flashes
-                flashTimes(2, flashDuration = 250L, interval = 200L, brightness = 200)
-            }
-            urgencyScore >= 2 -> {
-                // Low: 1 gentle flash
-                flashTimes(1, flashDuration = 300L, interval = 0L, brightness = 150)
+                // Urgent: 3 flashes - high priority
+                flashTimes(3, flashDuration = 180L, interval = 150L, brightness = 255)
             }
             else -> {
-                // Minimal: subtle pulse
-                flashTimes(1, flashDuration = 400L, interval = 0L, brightness = 100)
+                // Should not reach here due to threshold check above
+                Log.d(TAG, "No flash - below urgency threshold")
             }
         }
     }
