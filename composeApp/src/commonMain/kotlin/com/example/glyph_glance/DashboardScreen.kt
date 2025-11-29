@@ -131,7 +131,7 @@ fun DashboardScreen() {
 
         // Summary Cards
         item {
-            SummarySection()
+            SummarySection(notifications = allNotifications)
             Spacer(modifier = Modifier.height(24.dp))
         }
 
@@ -156,6 +156,12 @@ fun DashboardScreen() {
                                 style = MaterialTheme.typography.titleLarge,
                                 color = TextWhite,
                                 fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "(${filteredNotifications.size})",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextGrey
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             val rotationAngle by animateFloatAsState(
@@ -486,8 +492,13 @@ fun EditProfileDialog(
 }
 
 @Composable
-fun SummarySection() {
+fun SummarySection(notifications: List<ActivityNotification>) {
     val themeColors = LocalThemeColors.current
+    
+    // Calculate counts by priority
+    val highCount = notifications.count { it.priority == NotificationPriority.HIGH }
+    val mediumCount = notifications.count { it.priority == NotificationPriority.MEDIUM }
+    val lowCount = notifications.count { it.priority == NotificationPriority.LOW }
     
     // Outer box with solid black background
     Box(
@@ -514,7 +525,7 @@ fun SummarySection() {
             ) {
                 // High Priority
                 PriorityCountItem(
-                    count = "5",
+                    count = highCount.toString(),
                     label = "High",
                     color = themeColors.highPriority
                 )
@@ -529,7 +540,7 @@ fun SummarySection() {
                 
                 // Medium Priority
                 PriorityCountItem(
-                    count = "12",
+                    count = mediumCount.toString(),
                     label = "Medium",
                     color = themeColors.mediumPriority
                 )
@@ -544,7 +555,7 @@ fun SummarySection() {
                 
                 // Low Priority
                 PriorityCountItem(
-                    count = "8",
+                    count = lowCount.toString(),
                     label = "Low",
                     color = themeColors.lowPriority
                 )
@@ -647,6 +658,12 @@ fun KeywordsSection(
                         style = MaterialTheme.typography.titleLarge,
                         color = TextWhite,
                         fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "(${keywords.size})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextGrey
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     val rotationAngle by animateFloatAsState(
@@ -753,6 +770,12 @@ fun AppsSection(
                         style = MaterialTheme.typography.titleLarge,
                         color = TextWhite,
                         fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "(${appRules.size})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextGrey
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     val rotationAngle by animateFloatAsState(
