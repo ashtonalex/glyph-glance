@@ -8,7 +8,9 @@ import android.util.Log
 import androidx.room.Room
 import com.example.glyph_glance.data.database.AppDatabase
 import com.example.glyph_glance.data.models.NotificationPriority
+import com.example.glyph_glance.data.preferences.AndroidPreferencesManager
 import com.example.glyph_glance.data.repository.NotificationRepositoryImpl
+import com.example.glyph_glance.logic.calculatePriority
 import com.example.glyph_glance.logic.SentimentAnalysisService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +22,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var database: AppDatabase
     private lateinit var repository: NotificationRepositoryImpl
+    private lateinit var preferencesManager: AndroidPreferencesManager
     private val sentimentAnalysisService = SentimentAnalysisService()
     
     override fun onCreate() {
@@ -33,6 +36,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         .build()
         
         repository = NotificationRepositoryImpl(database.notificationDao())
+        preferencesManager = AndroidPreferencesManager(applicationContext)
         
         // Initialize sentiment analysis service in background
         serviceScope.launch {
@@ -70,26 +74,16 @@ class GlyphNotificationListenerService : NotificationListenerService() {
         // Ignore empty notifications
        if (title.isEmpty() && message.isEmpty()) return
         
-        // Determine priority based on notification importance
+        // Determine base priority based on notification importance
         val importance = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
             sbn.notification.priority
         } else {
             notification.priority
         }
         
-        val priority = NotificationPriority.fromImportance(importance)
+        val basePriority = NotificationPriority.fromImportance(importance)
         
-        // Create notification model (initially without sentiment)
-        var notificationModel = com.example.glyph_glance.data.models.Notification(
-            title = title,
-            message = message,
-            timestamp = sbn.postTime,
-            priority = priority,
-            appPackage = sbn.packageName,
-            appName = appName
-        )
-        
-        // Process notification: analyze sentiment and save to database
+        // Process notification: analyze sentiment, calculate priority from rules, and save to database
         serviceScope.launch {
             try {
                 // Perform sentiment analysis
@@ -104,8 +98,27 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     senderId = appName
                 )
                 
-                // Update notification model with sentiment analysis results
-                notificationModel = notificationModel.copy(
+                // Load keyword and app rules to calculate priority
+                val keywordRules = preferencesManager.getKeywordRules()
+                val appRules = preferencesManager.getAppRules()
+                
+                // Calculate priority based on rules (high priority keywords override lower priority ones)
+                val calculatedPriority = calculatePriority(
+                    text = fullText,
+                    appPackage = sbn.packageName,
+                    keywordRules = keywordRules,
+                    appRules = appRules,
+                    basePriority = basePriority
+                )
+                
+                // Create notification model with calculated priority and sentiment analysis results
+                val notificationModel = com.example.glyph_glance.data.models.Notification(
+                    title = title,
+                    message = message,
+                    timestamp = sbn.postTime,
+                    priority = calculatedPriority,
+                    appPackage = sbn.packageName,
+                    appName = appName,
                     sentiment = analysisResult?.sentiment,
                     urgencyScore = analysisResult?.urgencyScore
                 )
@@ -113,12 +126,36 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 // Save to database
                 repository.insertNotification(notificationModel)
                 
-                Log.d(TAG, "Saved notification: $title from $appName (Priority: $priority, " +
+                Log.d(TAG, "Saved notification: $title from $appName (Priority: $calculatedPriority (base: $basePriority), " +
                         "Sentiment: ${analysisResult?.sentiment}, Urgency: ${analysisResult?.urgencyScore})")
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing notification", e)
-                // Save without sentiment if analysis fails
+                // Save without sentiment if analysis fails, but still try to calculate priority
                 try {
+                    val keywordRules = preferencesManager.getKeywordRules()
+                    val appRules = preferencesManager.getAppRules()
+                    val fullText = if (title.isNotEmpty() && message.isNotEmpty()) {
+                        "$title: $message"
+                    } else {
+                        title.ifEmpty { message }
+                    }
+                    
+                    val calculatedPriority = calculatePriority(
+                        text = fullText,
+                        appPackage = sbn.packageName,
+                        keywordRules = keywordRules,
+                        appRules = appRules,
+                        basePriority = basePriority
+                    )
+                    
+                    val notificationModel = com.example.glyph_glance.data.models.Notification(
+                        title = title,
+                        message = message,
+                        timestamp = sbn.postTime,
+                        priority = calculatedPriority,
+                        appPackage = sbn.packageName,
+                        appName = appName
+                    )
                     repository.insertNotification(notificationModel)
                 } catch (saveError: Exception) {
                     Log.e(TAG, "Error saving notification", saveError)
