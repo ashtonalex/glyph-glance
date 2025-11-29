@@ -32,6 +32,11 @@ object LiveLogger {
     private val _isProcessingNotification = MutableStateFlow(false)
     val isProcessingNotification: StateFlow<Boolean> = _isProcessingNotification.asStateFlow()
     
+    private val _isQueuingNotification = MutableStateFlow(false)
+    val isQueuingNotification: StateFlow<Boolean> = _isQueuingNotification.asStateFlow()
+    
+    private val _queuingCount = MutableStateFlow(0)
+    
     /**
      * Add a log entry
      */
@@ -105,6 +110,22 @@ object LiveLogger {
      */
     fun setProcessingNotification(processing: Boolean) {
         _isProcessingNotification.value = processing
+    }
+    
+    /**
+     * Increment queuing counter
+     */
+    fun incrementQueuing() {
+        _queuingCount.update { it + 1 }
+        _isQueuingNotification.value = _queuingCount.value > 0
+    }
+    
+    /**
+     * Decrement queuing counter
+     */
+    fun decrementQueuing() {
+        _queuingCount.update { (it - 1).coerceAtLeast(0) }
+        _isQueuingNotification.value = _queuingCount.value > 0
     }
     
     /**

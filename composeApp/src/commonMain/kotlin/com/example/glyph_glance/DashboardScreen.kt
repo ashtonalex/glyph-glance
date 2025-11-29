@@ -1199,6 +1199,7 @@ fun PriorityCountItem(
 fun NotificationStatusCard() {
     val themeColors = LocalThemeColors.current
     val isProcessing by com.example.glyph_glance.logging.LiveLogger.isProcessingNotification.collectAsState()
+    val isQueuing by com.example.glyph_glance.logging.LiveLogger.isQueuingNotification.collectAsState()
     
     GlyphCard(
         modifier = Modifier.fillMaxWidth()
@@ -1221,6 +1222,19 @@ fun NotificationStatusCard() {
                     text = "Thinking...",
                     style = MaterialTheme.typography.bodyMedium,
                     color = themeColors.mediumPriority,
+                    fontWeight = FontWeight.Medium
+                )
+            } else if (isQueuing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = themeColors.lowPriority,
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Queuing...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = themeColors.lowPriority,
                     fontWeight = FontWeight.Medium
                 )
             } else {
