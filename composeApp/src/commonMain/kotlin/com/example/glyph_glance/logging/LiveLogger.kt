@@ -29,6 +29,9 @@ object LiveLogger {
     private val _notificationAccessEnabled = MutableStateFlow(false)
     val notificationAccessEnabled: StateFlow<Boolean> = _notificationAccessEnabled.asStateFlow()
     
+    private val _isProcessingNotification = MutableStateFlow(false)
+    val isProcessingNotification: StateFlow<Boolean> = _isProcessingNotification.asStateFlow()
+    
     /**
      * Add a log entry
      */
@@ -95,6 +98,13 @@ object LiveLogger {
                 status = LogStatus.WARNING
             )
         }
+    }
+    
+    /**
+     * Update notification processing status (LLM thinking state)
+     */
+    fun setProcessingNotification(processing: Boolean) {
+        _isProcessingNotification.value = processing
     }
     
     /**

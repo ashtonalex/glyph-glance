@@ -106,6 +106,9 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     title.ifEmpty { message }
                 }
                 
+                // Set processing state for UI feedback
+                LiveLogger.setProcessingNotification(true)
+                
                 // Process through GlyphIntelligenceEngine (handles AI analysis, contact profiles, and DB rules)
                 val decision = intelligenceEngine.processNotification(fullText, appName)
                 
@@ -151,9 +154,13 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 } else {
                     LiveLogger.logGlyphInteraction(decision.pattern.name, false)
                 }
+                
+                // Processing complete
+                LiveLogger.setProcessingNotification(false)
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing notification", e)
                 LiveLogger.logError("NotificationListener", e.message ?: "Error processing notification")
+                LiveLogger.setProcessingNotification(false)
                 
                 // Save with fallback priority if processing fails
                 try {

@@ -225,6 +225,12 @@ fun DashboardScreen() {
             SummarySection(notifications = allNotifications)
             Spacer(modifier = Modifier.height(24.dp))
         }
+        
+        // Notification Processing Status Card
+        item {
+            NotificationStatusCard()
+            Spacer(modifier = Modifier.height(24.dp))
+        }
 
         // Sentiment Analysis Test Section (only visible in developer mode)
         if (developerMode) {
@@ -896,6 +902,45 @@ fun PriorityCountItem(
             color = TextWhite,
             fontWeight = FontWeight.Bold
         )
+    }
+}
+
+@Composable
+fun NotificationStatusCard() {
+    val themeColors = LocalThemeColors.current
+    val isProcessing by com.example.glyph_glance.logging.LiveLogger.isProcessingNotification.collectAsState()
+    
+    GlyphCard(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isProcessing) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    color = themeColors.mediumPriority,
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Thinking...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = themeColors.mediumPriority,
+                    fontWeight = FontWeight.Medium
+                )
+            } else {
+                Text(
+                    text = "No pending notifications.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextGrey
+                )
+            }
+        }
     }
 }
 
