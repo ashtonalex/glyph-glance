@@ -26,8 +26,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -40,6 +43,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.glyph_glance.data.models.AppRule
 import com.example.glyph_glance.data.models.KeywordRule
@@ -123,6 +127,12 @@ fun DashboardScreen() {
     var showRawAiResponse by remember { mutableStateOf(false) }
     var finalUrgencyScore by remember { mutableStateOf<Int?>(null) }
     var rulesMatched by remember { mutableStateOf(false) }
+    
+    // Burst testing state
+    var burstCount by remember { mutableStateOf(5) }
+    var burstDelayMs by remember { mutableStateOf(100) }
+    var isBurstTesting by remember { mutableStateOf(false) }
+    var burstProgress by remember { mutableStateOf(0) }
     
     // Notification details dialog state
     var selectedNotification by remember { mutableStateOf<ActivityNotification?>(null) }
@@ -457,6 +467,114 @@ fun DashboardScreen() {
                                 testError = e.message ?: "Unknown error occurred"
                             } finally {
                                 isAnalyzing = false
+                            }
+                        }
+                    },
+                    // Burst testing parameters
+                    burstCount = burstCount,
+                    onBurstCountChange = { burstCount = it },
+                    burstDelayMs = burstDelayMs,
+                    onBurstDelayChange = { burstDelayMs = it },
+                    isBurstTesting = isBurstTesting,
+                    burstProgress = burstProgress,
+                    onBurstTest = {
+                        coroutineScope.launch {
+                            isBurstTesting = true
+                            burstProgress = 0
+                            testError = null
+                            
+                            try {
+                                val keywordRules = prefsManager.getKeywordRules()
+                                val appRulesLocal = prefsManager.getAppRules()
+                                
+                                for (i in 1..burstCount) {
+                                    burstProgress = i
+                                    
+                                    // Check if this app is ignored
+                                    val isAppIgnored = appRulesLocal.any { rule ->
+                                        rule.isIgnored && rule.appName.equals(testSender, ignoreCase = true)
+                                    }
+                                    
+                                    // Check semantic and user keywords
+                                    val userKeywords = keywordRules.map { it.keyword }
+                                    val semanticResult = semanticMatcher.match(testInput, userKeywords)
+                                    
+                                    // Calculate priority based on user keyword rules
+                                    val basePriority = NotificationPriority.MEDIUM
+                                    val ruleBasedPriority = calculatePriority(
+                                        text = testInput,
+                                        appPackage = "com.test.${testSender.lowercase().replace(" ", "")}",
+                                        appName = testSender,
+                                        keywordRules = keywordRules,
+                                        appRules = appRulesLocal,
+                                        basePriority = basePriority
+                                    )
+                                    val rulesMatchedValue = ruleBasedPriority != basePriority
+                                    val ruleBasedUrgencyScore = if (rulesMatchedValue) ruleBasedPriority.toUrgencyScore() else 0
+                                    val semanticUrgencyScore = if (semanticResult.matched) semanticResult.highestLevel else 0
+                                    val keywordMaxUrgency = maxOf(ruleBasedUrgencyScore, semanticUrgencyScore)
+                                    
+                                    val analysisResult: AnalysisResult?
+                                    val aiUrgencyScore: Int
+                                    
+                                    if (isAppIgnored) {
+                                        analysisResult = AnalysisResult(
+                                            urgencyScore = 1,
+                                            sentiment = "NEUTRAL",
+                                            triggeredRuleId = null,
+                                            rawAiResponse = "[App Ignored - AI skipped]"
+                                        )
+                                        aiUrgencyScore = 1
+                                    } else if (keywordMaxUrgency >= 6) {
+                                        analysisResult = AnalysisResult(
+                                            urgencyScore = 6,
+                                            sentiment = "URGENT",
+                                            triggeredRuleId = null,
+                                            rawAiResponse = "[Urgency 6 keyword - instant priority]"
+                                        )
+                                        aiUrgencyScore = 6
+                                    } else {
+                                        analysisResult = sentimentAnalysisService.analyzeNotification(
+                                            content = testInput,
+                                            senderId = testSender
+                                        )
+                                        aiUrgencyScore = analysisResult?.urgencyScore ?: 3
+                                    }
+                                    
+                                    val finalUrgencyScoreValue = if (isAppIgnored) {
+                                        1
+                                    } else {
+                                        maxOf(aiUrgencyScore, ruleBasedUrgencyScore, semanticUrgencyScore)
+                                    }
+                                    val finalPriorityFromUrgency = NotificationPriority.fromUrgencyScore(finalUrgencyScoreValue)
+                                    
+                                    val burstNotification = ActivityNotification(
+                                        id = 0,
+                                        title = "Burst #$i: $testSender",
+                                        message = testInput,
+                                        time = "Just now",
+                                        minutesAgo = 0,
+                                        priority = finalPriorityFromUrgency,
+                                        icon = getIconForApp(testSender),
+                                        sentiment = analysisResult?.sentiment,
+                                        urgencyScore = finalUrgencyScoreValue,
+                                        rawAiResponse = analysisResult?.rawAiResponse
+                                    )
+                                    
+                                    allNotifications.add(0, burstNotification)
+                                    
+                                    // Delay between notifications (except for the last one)
+                                    if (i < burstCount) {
+                                        kotlinx.coroutines.delay(burstDelayMs.toLong())
+                                    }
+                                }
+                                
+                                testSuccess = true
+                            } catch (e: Exception) {
+                                testError = "Burst test failed: ${e.message}"
+                            } finally {
+                                isBurstTesting = false
+                                burstProgress = 0
                             }
                         }
                     }
@@ -1662,7 +1780,15 @@ fun SentimentTestSection(
     showRawAiResponse: Boolean,
     onShowRawAiResponseChange: (Boolean) -> Unit,
     finalUrgencyScore: Int?,
-    onAnalyze: () -> Unit
+    onAnalyze: () -> Unit,
+    // Burst testing parameters
+    burstCount: Int,
+    onBurstCountChange: (Int) -> Unit,
+    burstDelayMs: Int,
+    onBurstDelayChange: (Int) -> Unit,
+    isBurstTesting: Boolean,
+    burstProgress: Int,
+    onBurstTest: () -> Unit
 ) {
     val themeColors = LocalThemeColors.current
     
@@ -1783,6 +1909,157 @@ fun SentimentTestSection(
                             Text("Analyzing...")
                         } else {
                             Text("Analyze with AI")
+                        }
+                    }
+                    
+                    // Burst Testing Section
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                SurfaceDarkGrey.copy(alpha = 0.4f),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .border(
+                                1.dp,
+                                Color.White.copy(alpha = 0.08f),
+                                RoundedCornerShape(12.dp)
+                            )
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "⚡ Rapid Fire Test",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold
+                        )
+                        
+                        Text(
+                            text = "Send multiple notifications in quick succession",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextGrey
+                        )
+                        
+                        // Count control
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Count:",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextWhite
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { if (burstCount > 2) onBurstCountChange(burstCount - 1) },
+                                    enabled = !isBurstTesting && burstCount > 2,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Decrease",
+                                        tint = if (burstCount > 2) TextWhite else TextGrey
+                                    )
+                                }
+                                Text(
+                                    text = "$burstCount",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = getThemeMediumPriority(),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.width(40.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                                IconButton(
+                                    onClick = { if (burstCount < 20) onBurstCountChange(burstCount + 1) },
+                                    enabled = !isBurstTesting && burstCount < 20,
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.KeyboardArrowUp,
+                                        contentDescription = "Increase",
+                                        tint = if (burstCount < 20) TextWhite else TextGrey
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // Delay control
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Delay:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextWhite
+                                )
+                                Text(
+                                    text = "${burstDelayMs}ms",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = getThemeMediumPriority(),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            Slider(
+                                value = burstDelayMs.toFloat(),
+                                onValueChange = { onBurstDelayChange(it.toInt()) },
+                                valueRange = 50f..1000f,
+                                steps = 18, // 50ms increments roughly
+                                enabled = !isBurstTesting,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = getThemeMediumPriority(),
+                                    activeTrackColor = getThemeMediumPriority(),
+                                    inactiveTrackColor = TextGrey.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("50ms", style = MaterialTheme.typography.labelSmall, color = TextGrey)
+                                Text("1000ms", style = MaterialTheme.typography.labelSmall, color = TextGrey)
+                            }
+                        }
+                        
+                        // Burst Test Button
+                        Button(
+                            onClick = onBurstTest,
+                            enabled = !isBurstTesting && !isAnalyzing && testInput.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = themeColors.highPriority,
+                                contentColor = TextWhite,
+                                disabledContainerColor = TextGrey.copy(alpha = 0.3f),
+                                disabledContentColor = TextGrey
+                            )
+                        ) {
+                            if (isBurstTesting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = TextWhite,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Sending $burstProgress / $burstCount...")
+                            } else {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("🚀 Rapid Fire ($burstCount × ${burstDelayMs}ms)")
+                            }
                         }
                     }
                     
@@ -1949,7 +2226,7 @@ fun SentimentTestSection(
                                             Row(
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                             ) {
-                                                repeat(5) { index ->
+                                                repeat(6) { index ->
                                                     Box(
                                                         modifier = Modifier
                                                             .size(8.dp)
