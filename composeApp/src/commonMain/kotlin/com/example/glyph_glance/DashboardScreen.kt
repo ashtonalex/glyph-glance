@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,6 +44,9 @@ import com.example.glyph_glance.data.models.AppRule
 import com.example.glyph_glance.data.models.KeywordRule
 import com.example.glyph_glance.data.models.NotificationPriority
 import com.example.glyph_glance.data.models.UserProfile
+import com.example.glyph_glance.logic.AnalysisResult
+import com.example.glyph_glance.logic.SentimentAnalysisService
+import com.example.glyph_glance.logic.calculatePriority
 import kotlinx.coroutines.launch
 
 enum class ActivityFilter {
@@ -50,6 +54,11 @@ enum class ActivityFilter {
     HIGH,
     MEDIUM,
     LOW
+}
+
+enum class SortOption {
+    RECENT,      // Sort by time (most recent first)
+    ALPHABETICAL // Sort alphabetically by title
 }
 
 // Sample notification data structure for display
@@ -74,6 +83,8 @@ fun DashboardScreen() {
     var selectedFilter by remember { mutableStateOf(ActivityFilter.ALL) }
     var filterExpanded by remember { mutableStateOf(false) }
     var activityExpanded by remember { mutableStateOf(false) }
+    var selectedSort by remember { mutableStateOf(SortOption.RECENT) }
+    var sortExpanded by remember { mutableStateOf(false) }
     
     // Keywords state
     var keywords by remember { mutableStateOf(listOf<KeywordRule>()) }
@@ -85,15 +96,23 @@ fun DashboardScreen() {
     var appsExpanded by remember { mutableStateOf(false) }
     var showAddAppDialog by remember { mutableStateOf(false) }
     
-    // Load keywords and apps on first composition
-    LaunchedEffect(Unit) {
-        keywords = prefsManager.getKeywordRules()
-        appRules = prefsManager.getAppRules()
-    }
+    // Developer mode state
+    var developerMode by remember { mutableStateOf(false) }
     
-    // Sample notification data with timestamps
-    val allNotifications = remember {
-        listOf(
+    // Sentiment Analysis Test state
+    val sentimentAnalysisService = remember { SentimentAnalysisService() }
+    var testExpanded by remember { mutableStateOf(false) }
+    var testInput by remember { mutableStateOf("") }
+    var testSender by remember { mutableStateOf("Test App") }
+    var testResult by remember { mutableStateOf<AnalysisResult?>(null) }
+    var calculatedPriority by remember { mutableStateOf<NotificationPriority?>(null) }
+    var isAnalyzing by remember { mutableStateOf(false) }
+    var testError by remember { mutableStateOf<String?>(null) }
+    var testSuccess by remember { mutableStateOf(false) }
+    
+    // Notifications list - starts with sample data, can be updated with test results
+    val allNotifications = remember { 
+        mutableStateListOf(
             ActivityNotification("Message from Alex", "Hey, are we still on for tonight?", "1m ago", 1, NotificationPriority.HIGH, Icons.Default.Star, "POSITIVE", 2),
             ActivityNotification("Email from Work", "Meeting reminder at 3 PM", "3m ago", 3, NotificationPriority.MEDIUM, Icons.Default.Person, "NEUTRAL", 3),
             ActivityNotification("Social Update", "You have 5 new followers", "5m ago", 5, NotificationPriority.LOW, Icons.Default.Notifications, "POSITIVE", 1),
@@ -107,15 +126,60 @@ fun DashboardScreen() {
         )
     }
     
-    // Filter and sort notifications
-    val filteredNotifications = remember(selectedFilter, allNotifications) {
-        val filtered = when (selectedFilter) {
-            ActivityFilter.ALL -> allNotifications
-            ActivityFilter.HIGH -> allNotifications.filter { it.priority == NotificationPriority.HIGH }
-            ActivityFilter.MEDIUM -> allNotifications.filter { it.priority == NotificationPriority.MEDIUM }
-            ActivityFilter.LOW -> allNotifications.filter { it.priority == NotificationPriority.LOW }
+    // Load keywords, apps, and developer mode on first composition
+    LaunchedEffect(Unit) {
+        keywords = prefsManager.getKeywordRules()
+        appRules = prefsManager.getAppRules()
+        developerMode = prefsManager.getDeveloperMode()
+    }
+    
+    // Helper function to format time ago
+    fun formatTimeAgo(minutesAgo: Int): String {
+        return when {
+            minutesAgo < 1 -> "Just now"
+            minutesAgo < 60 -> "${minutesAgo}m ago"
+            minutesAgo < 1440 -> "${minutesAgo / 60}h ago"
+            else -> "${minutesAgo / 1440}d ago"
         }
-        filtered.sortedByDescending { it.minutesAgo }
+    }
+    
+    // Helper function to get icon for app
+    fun getIconForApp(appName: String): androidx.compose.ui.graphics.vector.ImageVector {
+        return when {
+            appName.contains("Message", ignoreCase = true) || appName.contains("WhatsApp", ignoreCase = true) -> Icons.Default.Star
+            appName.contains("Email", ignoreCase = true) || appName.contains("Mail", ignoreCase = true) -> Icons.Default.Person
+            else -> Icons.Default.Notifications
+        }
+    }
+    
+    // Filter and sort notifications
+    // Use allNotifications.size as a key to detect changes to the list
+    val filteredNotifications = remember(selectedFilter, selectedSort, allNotifications.size) {
+        // First, create indexed list from allNotifications to preserve original order
+        val indexedNotifications = allNotifications.mapIndexed { index, notification -> 
+            index to notification 
+        }
+        
+        // Filter based on priority
+        val filtered = when (selectedFilter) {
+            ActivityFilter.ALL -> indexedNotifications
+            ActivityFilter.HIGH -> indexedNotifications.filter { it.second.priority == NotificationPriority.HIGH }
+            ActivityFilter.MEDIUM -> indexedNotifications.filter { it.second.priority == NotificationPriority.MEDIUM }
+            ActivityFilter.LOW -> indexedNotifications.filter { it.second.priority == NotificationPriority.LOW }
+        }
+        
+        when (selectedSort) {
+            // For RECENT: sort by minutesAgo ascending (0 = just now, most recent first)
+            // Preserve original insertion order (index) for items with same minutesAgo
+            // This ensures newly added items (at index 0) appear first when they have the same minutesAgo
+            SortOption.RECENT -> filtered
+                .sortedWith(compareBy<Pair<Int, ActivityNotification>> { it.second.minutesAgo }
+                    .thenBy { it.first }) // Lower index (newer items added at index 0) come first
+                .map { it.second }
+            SortOption.ALPHABETICAL -> filtered
+                .map { it.second }
+                .sortedBy { it.title.lowercase() }
+        }
     }
     LazyColumn(
         modifier = Modifier
@@ -125,7 +189,14 @@ fun DashboardScreen() {
     ) {
         // Header
         item {
-            HeaderSection()
+            HeaderSection(
+                onDeveloperModeToggle = { enabled ->
+                    developerMode = enabled
+                    coroutineScope.launch {
+                        prefsManager.saveDeveloperMode(enabled)
+                    }
+                }
+            )
             Spacer(modifier = Modifier.height(24.dp))
         }
 
@@ -133,6 +204,83 @@ fun DashboardScreen() {
         item {
             SummarySection(notifications = allNotifications)
             Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        // Sentiment Analysis Test Section (only visible in developer mode)
+        if (developerMode) {
+            item {
+                SentimentTestSection(
+                    isExpanded = testExpanded,
+                    onExpandedChange = { testExpanded = it },
+                    testInput = testInput,
+                    onTestInputChange = { testInput = it },
+                    testSender = testSender,
+                    onTestSenderChange = { testSender = it },
+                    testResult = testResult,
+                    calculatedPriority = calculatedPriority,
+                    isAnalyzing = isAnalyzing,
+                    testError = testError,
+                    testSuccess = testSuccess,
+                    onAnalyze = {
+                        coroutineScope.launch {
+                            isAnalyzing = true
+                            testError = null
+                            testResult = null
+                            calculatedPriority = null
+                            testSuccess = false
+                            try {
+                                // Step 1: Perform sentiment analysis
+                                val analysisResult = sentimentAnalysisService.analyzeNotification(
+                                    content = testInput,
+                                    senderId = testSender
+                                )
+                                testResult = analysisResult
+                                
+                                // Step 2: Check keyword and app rules
+                                val keywordRules = prefsManager.getKeywordRules()
+                                val appRules = prefsManager.getAppRules()
+                                
+                                // Step 3: Calculate priority based on rules
+                                // Pass both package name and app name so app rules can match by either
+                                val finalPriority = calculatePriority(
+                                    text = testInput,
+                                    appPackage = "com.test.${testSender.lowercase().replace(" ", "")}",
+                                    appName = testSender,
+                                    keywordRules = keywordRules,
+                                    appRules = appRules,
+                                    basePriority = NotificationPriority.MEDIUM // Default base priority for tests
+                                )
+                                calculatedPriority = finalPriority
+                                
+                                // Step 4: Create notification entry and add to Recent Activity
+                                // Urgency score reflects the final priority (after rules)
+                                val finalUrgencyScore = finalPriority.toUrgencyScore()
+                                val testNotification = ActivityNotification(
+                                    title = "Test: $testSender",
+                                    message = testInput,
+                                    time = "Just now",
+                                    minutesAgo = 0,
+                                    priority = finalPriority,
+                                    icon = getIconForApp(testSender),
+                                    sentiment = analysisResult?.sentiment,
+                                    urgencyScore = finalUrgencyScore
+                                )
+                                
+                                // Add to the beginning of the list
+                                // Using add(0, ...) on mutableStateListOf will trigger recomposition
+                                allNotifications.add(0, testNotification)
+                                testSuccess = true
+                                
+                            } catch (e: Exception) {
+                                testError = e.message ?: "Unknown error occurred"
+                            } finally {
+                                isAnalyzing = false
+                            }
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
 
         // Recent Activity with Collapsible Box
@@ -153,7 +301,7 @@ fun DashboardScreen() {
                         ) {
                             Text(
                                 text = "Recent Activity",
-                                style = MaterialTheme.typography.titleLarge,
+                                style = MaterialTheme.typography.titleMedium,
                                 color = TextWhite,
                                 fontWeight = FontWeight.Bold
                             )
@@ -179,67 +327,138 @@ fun DashboardScreen() {
                             )
                         }
                         
-                        // Filter Dropdown
-                        Box {
-                            Row(
-                                modifier = Modifier
-                                    .clickable { filterExpanded = true }
-                                    .background(SurfaceDarkGrey.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = when (selectedFilter) {
-                                        ActivityFilter.ALL -> "All"
-                                        ActivityFilter.HIGH -> "High"
-                                        ActivityFilter.MEDIUM -> "Medium"
-                                        ActivityFilter.LOW -> "Low"
-                                    },
-                                    color = TextWhite,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    Icons.Default.ArrowDropDown,
-                                    contentDescription = "Filter",
-                                    tint = TextWhite
-                                )
+                        // Filter and Sort Controls
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Sort Dropdown
+                            Box {
+                                Row(
+                                    modifier = Modifier
+                                        .clickable { sortExpanded = true }
+                                        .background(SurfaceDarkGrey.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                        .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Sort,
+                                        contentDescription = "Sort",
+                                        tint = TextWhite,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = when (selectedSort) {
+                                            SortOption.RECENT -> "Recent"
+                                            SortOption.ALPHABETICAL -> "A-Z"
+                                        },
+                                        color = TextWhite,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.ArrowDropDown,
+                                        contentDescription = "Sort",
+                                        tint = TextWhite,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                
+                                DropdownMenu(
+                                    expanded = sortExpanded,
+                                    onDismissRequest = { sortExpanded = false },
+                                    modifier = Modifier.background(SurfaceBlack, RoundedCornerShape(8.dp))
+                                ) {
+                                    SortOption.values().forEach { sort ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = when (sort) {
+                                                        SortOption.RECENT -> "Recent First"
+                                                        SortOption.ALPHABETICAL -> "Alphabetical (A-Z)"
+                                                    },
+                                                    color = if (selectedSort == sort) {
+                                                        themeColors.mediumPriority
+                                                    } else TextWhite
+                                                )
+                                            },
+                                            onClick = {
+                                                selectedSort = sort
+                                                sortExpanded = false
+                                            },
+                                            colors = MenuDefaults.itemColors(
+                                                textColor = TextWhite
+                                            )
+                                        )
+                                    }
+                                }
                             }
                             
-                            DropdownMenu(
-                                expanded = filterExpanded,
-                                onDismissRequest = { filterExpanded = false },
-                                modifier = Modifier.background(SurfaceBlack, RoundedCornerShape(8.dp))
-                            ) {
-                                ActivityFilter.values().forEach { filter ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = when (filter) {
-                                                    ActivityFilter.ALL -> "All"
-                                                    ActivityFilter.HIGH -> "High Priority"
-                                                    ActivityFilter.MEDIUM -> "Medium Priority"
-                                                    ActivityFilter.LOW -> "Low Priority"
-                                                },
-                                                color = if (selectedFilter == filter) {
-                                                    when (filter) {
-                                                        ActivityFilter.HIGH -> themeColors.highPriority
-                                                        ActivityFilter.MEDIUM -> themeColors.mediumPriority
-                                                        ActivityFilter.LOW -> themeColors.lowPriority
-                                                        else -> TextWhite
-                                                    }
-                                                } else TextWhite
-                                            )
+                            // Filter Dropdown
+                            Box {
+                                Row(
+                                    modifier = Modifier
+                                        .clickable { filterExpanded = true }
+                                        .background(SurfaceDarkGrey.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                        .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = when (selectedFilter) {
+                                            ActivityFilter.ALL -> "All"
+                                            ActivityFilter.HIGH -> "High"
+                                            ActivityFilter.MEDIUM -> "Medium"
+                                            ActivityFilter.LOW -> "Low"
                                         },
-                                        onClick = {
-                                            selectedFilter = filter
-                                            filterExpanded = false
-                                        },
-                                        colors = MenuDefaults.itemColors(
-                                            textColor = TextWhite
-                                        )
+                                        color = TextWhite,
+                                        style = MaterialTheme.typography.bodyMedium
                                     )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.ArrowDropDown,
+                                        contentDescription = "Filter",
+                                        tint = TextWhite,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                
+                                DropdownMenu(
+                                    expanded = filterExpanded,
+                                    onDismissRequest = { filterExpanded = false },
+                                    modifier = Modifier.background(SurfaceBlack, RoundedCornerShape(8.dp))
+                                ) {
+                                    ActivityFilter.values().forEach { filter ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = when (filter) {
+                                                        ActivityFilter.ALL -> "All"
+                                                        ActivityFilter.HIGH -> "High Priority"
+                                                        ActivityFilter.MEDIUM -> "Medium Priority"
+                                                        ActivityFilter.LOW -> "Low Priority"
+                                                    },
+                                                    color = if (selectedFilter == filter) {
+                                                        when (filter) {
+                                                            ActivityFilter.HIGH -> themeColors.highPriority
+                                                            ActivityFilter.MEDIUM -> themeColors.mediumPriority
+                                                            ActivityFilter.LOW -> themeColors.lowPriority
+                                                            else -> TextWhite
+                                                        }
+                                                    } else TextWhite
+                                                )
+                                            },
+                                            onClick = {
+                                                selectedFilter = filter
+                                                filterExpanded = false
+                                            },
+                                            colors = MenuDefaults.itemColors(
+                                                textColor = TextWhite
+                                            )
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -368,15 +587,31 @@ fun DashboardScreen() {
 }
 
 @Composable
-fun HeaderSection() {
+fun HeaderSection(
+    onDeveloperModeToggle: (Boolean) -> Unit = {}
+) {
     val prefsManager = rememberPreferencesManager()
     val coroutineScope = rememberCoroutineScope()
     var userProfile by remember { mutableStateOf(UserProfile()) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var tapCount by remember { mutableStateOf(0) }
+    var lastTapTime by remember { mutableStateOf(0L) }
+    var developerMode by remember { mutableStateOf(false) }
     
-    // Load user profile on first composition
+    // Load user profile and developer mode on first composition
     LaunchedEffect(Unit) {
         userProfile = prefsManager.getUserProfile()
+        developerMode = prefsManager.getDeveloperMode()
+    }
+    
+    // Reset tap count after 2 seconds of no taps
+    LaunchedEffect(tapCount) {
+        if (tapCount > 0) {
+            kotlinx.coroutines.delay(2000)
+            if (System.currentTimeMillis() - lastTapTime > 2000) {
+                tapCount = 0
+            }
+        }
     }
     
     Row(
@@ -394,7 +629,27 @@ fun HeaderSection() {
             Text(
                 text = userProfile.greeting,
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextGrey
+                color = TextGrey,
+                modifier = Modifier.clickable {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastTapTime < 1000) {
+                        tapCount++
+                    } else {
+                        tapCount = 1
+                    }
+                    lastTapTime = currentTime
+                    
+                    // Enable developer mode after 7 taps
+                    if (tapCount >= 7) {
+                        val newMode = !developerMode
+                        developerMode = newMode
+                        coroutineScope.launch {
+                            prefsManager.saveDeveloperMode(newMode)
+                            onDeveloperModeToggle(newMode)
+                        }
+                        tapCount = 0
+                    }
+                }
             )
         }
         
@@ -655,7 +910,7 @@ fun KeywordsSection(
                 ) {
                     Text(
                         text = "Keywords",
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         color = TextWhite,
                         fontWeight = FontWeight.Bold
                     )
@@ -767,7 +1022,7 @@ fun AppsSection(
                 ) {
                     Text(
                         text = "Apps",
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         color = TextWhite,
                         fontWeight = FontWeight.Bold
                     )
@@ -1082,4 +1337,380 @@ fun AddAppDialog(
         },
         containerColor = SurfaceBlack
     )
+}
+
+@Composable
+fun SentimentTestSection(
+    isExpanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    testInput: String,
+    onTestInputChange: (String) -> Unit,
+    testSender: String,
+    onTestSenderChange: (String) -> Unit,
+    testResult: AnalysisResult?,
+    calculatedPriority: NotificationPriority?,
+    isAnalyzing: Boolean,
+    testError: String?,
+    testSuccess: Boolean,
+    onAnalyze: () -> Unit
+) {
+    val themeColors = LocalThemeColors.current
+    
+    GlyphCard(modifier = Modifier.fillMaxWidth()) {
+        Column {
+            // Header Row - Clickable to toggle
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onExpandedChange(!isExpanded) }
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "AI Sentiment Test",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = TextWhite,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    val rotationAngle by animateFloatAsState(
+                        targetValue = if (isExpanded) 180f else 0f,
+                        animationSpec = tween(300, easing = FastOutSlowInEasing),
+                        label = "test_icon_rotation"
+                    )
+                    Icon(
+                        Icons.Default.ArrowDropDown,
+                        contentDescription = if (isExpanded) "Collapse" else "Expand",
+                        tint = TextWhite,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .rotate(rotationAngle)
+                    )
+                }
+            }
+            
+            // Test Content - Animated visibility
+            AnimatedVisibility(
+                visible = isExpanded,
+                enter = expandVertically(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.Top
+                ) + fadeIn(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                ),
+                exit = shrinkVertically(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Top
+                ) + fadeOut(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Sender input
+                    OutlinedTextField(
+                        value = testSender,
+                        onValueChange = onTestSenderChange,
+                        label = { Text("Sender/App Name") },
+                        placeholder = { Text("e.g., WhatsApp, Email, etc.") },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextWhite,
+                            unfocusedTextColor = TextWhite,
+                            focusedBorderColor = getThemeMediumPriority(),
+                            unfocusedBorderColor = TextGrey,
+                            focusedLabelColor = getThemeMediumPriority(),
+                            unfocusedLabelColor = TextGrey
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    // Message input
+                    OutlinedTextField(
+                        value = testInput,
+                        onValueChange = onTestInputChange,
+                        label = { Text("Notification Message") },
+                        placeholder = { Text("Enter a notification message to test...") },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextWhite,
+                            unfocusedTextColor = TextWhite,
+                            focusedBorderColor = getThemeMediumPriority(),
+                            unfocusedBorderColor = TextGrey,
+                            focusedLabelColor = getThemeMediumPriority(),
+                            unfocusedLabelColor = TextGrey
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3
+                    )
+                    
+                    // Analyze button
+                    Button(
+                        onClick = onAnalyze,
+                        enabled = !isAnalyzing && testInput.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = getThemeMediumPriority(),
+                            contentColor = TextWhite,
+                            disabledContainerColor = TextGrey.copy(alpha = 0.3f),
+                            disabledContentColor = TextGrey
+                        )
+                    ) {
+                        if (isAnalyzing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = TextWhite,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Analyzing...")
+                        } else {
+                            Text("Analyze with AI")
+                        }
+                    }
+                    
+                    // Results display
+                    if (testResult != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    SurfaceDarkGrey.copy(alpha = 0.6f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    Color.White.copy(alpha = 0.1f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(16.dp)
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    text = "Analysis Results",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextWhite,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                
+                                // Urgency Score (AI Analysis)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "AI Urgency Score:",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = TextGrey
+                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        // Score display with color
+                                        val aiUrgencyColor = when (testResult.urgencyScore) {
+                                            5 -> themeColors.highPriority
+                                            4 -> themeColors.highPriority.copy(alpha = 0.8f)
+                                            3 -> themeColors.mediumPriority
+                                            2 -> themeColors.lowPriority.copy(alpha = 0.8f)
+                                            else -> themeColors.lowPriority
+                                        }
+                                        Text(
+                                            text = "${testResult.urgencyScore}/5",
+                                            style = MaterialTheme.typography.headlineSmall,
+                                            color = aiUrgencyColor,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        // Visual indicator
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            repeat(5) { index ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(8.dp)
+                                                        .background(
+                                                            if (index < testResult.urgencyScore) aiUrgencyColor else TextGrey.copy(alpha = 0.3f),
+                                                            CircleShape
+                                                        )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Final Urgency Score (after rules)
+                                if (calculatedPriority != null) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Final Urgency Score:",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = TextGrey
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Score display with color based on final priority
+                                            val finalUrgencyScore = calculatedPriority.toUrgencyScore()
+                                            val finalUrgencyColor = when (finalUrgencyScore) {
+                                                5 -> themeColors.highPriority
+                                                4 -> themeColors.highPriority.copy(alpha = 0.8f)
+                                                3 -> themeColors.mediumPriority
+                                                2 -> themeColors.lowPriority.copy(alpha = 0.8f)
+                                                else -> themeColors.lowPriority
+                                            }
+                                            Text(
+                                                text = "$finalUrgencyScore/5",
+                                                style = MaterialTheme.typography.headlineSmall,
+                                                color = finalUrgencyColor,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            // Visual indicator
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                repeat(5) { index ->
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(8.dp)
+                                                            .background(
+                                                                if (index < finalUrgencyScore) finalUrgencyColor else TextGrey.copy(alpha = 0.3f),
+                                                                CircleShape
+                                                            )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Sentiment
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Sentiment:",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = TextGrey
+                                    )
+                                    val sentimentColor = when (testResult.sentiment) {
+                                        "POSITIVE" -> Color(0xFF4CAF50)
+                                        "NEGATIVE" -> themeColors.highPriority
+                                        else -> themeColors.mediumPriority
+                                    }
+                                    Text(
+                                        text = testResult.sentiment,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = sentimentColor,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                
+                                // Calculated Priority (after rules)
+                                if (calculatedPriority != null) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "Final Priority:",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = TextGrey
+                                        )
+                                        val priorityColor = when (calculatedPriority) {
+                                            NotificationPriority.HIGH -> themeColors.highPriority
+                                            NotificationPriority.MEDIUM -> themeColors.mediumPriority
+                                            NotificationPriority.LOW -> themeColors.lowPriority
+                                        }
+                                        Text(
+                                            text = calculatedPriority.name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = priorityColor,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Success message
+                    if (testSuccess && testResult != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Color(0xFF4CAF50).copy(alpha = 0.2f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    Color(0xFF4CAF50).copy(alpha = 0.5f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(16.dp)
+                        ) {
+                            Text(
+                                text = "✓ Notification added to Recent Activity with priority based on keyword/app rules",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFF4CAF50),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    
+                    // Error display
+                    if (testError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    themeColors.highPriority.copy(alpha = 0.2f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    themeColors.highPriority.copy(alpha = 0.5f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(16.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Error",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = themeColors.highPriority,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = testError,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextWhite
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -3,6 +3,7 @@ package com.example.glyph_glance.data.preferences
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -28,6 +29,7 @@ class AndroidPreferencesManager(private val context: Context) : PreferencesManag
         private val LED_THEME_KEY = stringPreferencesKey("led_theme")
         private val CUSTOM_PRESETS_KEY = stringPreferencesKey("custom_presets")
         private val USER_PROFILE_KEY = stringPreferencesKey("user_profile")
+        private val DEVELOPER_MODE_KEY = booleanPreferencesKey("developer_mode")
     }
     
     override suspend fun saveKeywordRules(rules: List<KeywordRule>) {
@@ -97,6 +99,18 @@ class AndroidPreferencesManager(private val context: Context) : PreferencesManag
             prefs[USER_PROFILE_KEY]?.let { jsonString ->
                 json.decodeFromString<UserProfile>(jsonString)
             } ?: UserProfile()
+        }.first()
+    }
+    
+    override suspend fun saveDeveloperMode(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[DEVELOPER_MODE_KEY] = enabled
+        }
+    }
+    
+    override suspend fun getDeveloperMode(): Boolean {
+        return context.dataStore.data.map { prefs ->
+            prefs[DEVELOPER_MODE_KEY] ?: false
         }.first()
     }
 }

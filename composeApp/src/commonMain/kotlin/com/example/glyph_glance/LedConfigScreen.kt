@@ -76,7 +76,6 @@ fun LedConfigurationTab() {
     val themeColors = LocalThemeColors.current
     var brightness by remember { mutableStateOf(0.8f) }
     var pulseSpeed by remember { mutableStateOf(0.5f) }
-    var syncWithMusic by remember { mutableStateOf(true) }
     
     Column(
         modifier = Modifier
@@ -136,26 +135,6 @@ fun LedConfigurationTab() {
             onValueChange = { pulseSpeed = it },
             themeColor = themeColors.mediumPriority
         )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Sync with Music", color = TextWhite, style = MaterialTheme.typography.bodyLarge)
-            Switch(
-                checked = syncWithMusic,
-                onCheckedChange = { syncWithMusic = it },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = themeColors.lowPriority,
-                    checkedTrackColor = themeColors.lowPriority.copy(alpha = 0.5f),
-                    uncheckedThumbColor = TextGrey,
-                    uncheckedTrackColor = SurfaceDarkGrey
-                )
-            )
-        }
     }
 }
 

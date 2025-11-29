@@ -103,15 +103,19 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                 val appRules = preferencesManager.getAppRules()
                 
                 // Calculate priority based on rules (high priority keywords override lower priority ones)
+                // Pass both package name and app name so app rules can match by either
                 val calculatedPriority = calculatePriority(
                     text = fullText,
                     appPackage = sbn.packageName,
+                    appName = appName,
                     keywordRules = keywordRules,
                     appRules = appRules,
                     basePriority = basePriority
                 )
                 
                 // Create notification model with calculated priority and sentiment analysis results
+                // Urgency score reflects the final priority (after rules), not just AI analysis
+                val finalUrgencyScore = calculatedPriority.toUrgencyScore()
                 val notificationModel = com.example.glyph_glance.data.models.Notification(
                     title = title,
                     message = message,
@@ -120,7 +124,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     appPackage = sbn.packageName,
                     appName = appName,
                     sentiment = analysisResult?.sentiment,
-                    urgencyScore = analysisResult?.urgencyScore
+                    urgencyScore = finalUrgencyScore
                 )
                 
                 // Save to database
@@ -143,6 +147,7 @@ class GlyphNotificationListenerService : NotificationListenerService() {
                     val calculatedPriority = calculatePriority(
                         text = fullText,
                         appPackage = sbn.packageName,
+                        appName = appName,
                         keywordRules = keywordRules,
                         appRules = appRules,
                         basePriority = basePriority

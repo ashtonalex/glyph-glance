@@ -10,6 +10,7 @@ import com.example.glyph_glance.data.models.NotificationPriority
  * 
  * @param text The notification text (title + message)
  * @param appPackage The package name of the app that sent the notification
+ * @param appName The display name of the app that sent the notification (optional, for matching app rules)
  * @param keywordRules List of keyword rules to check against
  * @param appRules List of app rules to check against
  * @param basePriority The base priority from the notification system
@@ -18,6 +19,7 @@ import com.example.glyph_glance.data.models.NotificationPriority
 fun calculatePriority(
     text: String,
     appPackage: String,
+    appName: String? = null,
     keywordRules: List<KeywordRule>,
     appRules: List<AppRule>,
     basePriority: NotificationPriority
@@ -45,9 +47,16 @@ fun calculatePriority(
         }
     }
     
-    // Check app rules
+    // Check app rules (case-insensitive) - check both package name and app name
+    val appPackageLower = appPackage.lowercase()
+    val appNameLower = appName?.lowercase()
     appRules.forEach { rule ->
-        if (rule.packageName == appPackage) {
+        val rulePackageLower = rule.packageName.lowercase()
+        val ruleAppNameLower = rule.appName.lowercase()
+        
+        // Match by package name or app name
+        if (rulePackageLower == appPackageLower || 
+            (appNameLower != null && ruleAppNameLower == appNameLower)) {
             updatePriority(rule.priority)
         }
     }
