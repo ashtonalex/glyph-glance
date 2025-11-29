@@ -377,7 +377,6 @@ Output ONLY the integer.
                 LiveLogger.logError("AI Analysis", e.message ?: "Unknown error")
                 getDefaultResult()
             }
-        }
     }
     
     /**

@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Manager for controlling the Glyph Matrix LED display.
- * Handles initialization and flashing patterns.
+ * Handles initialization and flashing patterns based on urgency scores.
  */
 class GlyphManager private constructor(private val context: Context) {
     
@@ -24,12 +24,17 @@ class GlyphManager private constructor(private val context: Context) {
     private var isInitializing = false
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
+    // Pending flash request (waits for UI to be ready)
+    private var pendingFlashUrgency: Int? = null
+    private var autoFlashEnabled = false // Disabled by default - UI triggers flash
+    
     companion object {
         private const val TAG = "GlyphManager"
         private const val DEVICE_23112 = "23112" // Phone 3 device ID
         private const val FLASH_DURATION_MS = 200L // Duration of each flash
         private const val FLASH_INTERVAL_MS = 150L // Interval between flashes
         private const val MATRIX_SIZE = 25 // 25x25 LED matrix
+        private const val UI_READY_DELAY_MS = 500L // Wait for UI to update before flashing
         
         @Volatile
         private var INSTANCE: GlyphManager? = null
@@ -40,6 +45,19 @@ class GlyphManager private constructor(private val context: Context) {
             }
         }
     }
+    
+    /**
+     * Enable or disable automatic flashing when notifications are processed
+     */
+    fun setAutoFlashEnabled(enabled: Boolean) {
+        autoFlashEnabled = enabled
+        Log.d(TAG, "Auto-flash ${if (enabled) "enabled" else "disabled"}")
+    }
+    
+    /**
+     * Check if auto-flash is enabled
+     */
+    fun isAutoFlashEnabled(): Boolean = autoFlashEnabled
     
     /**
      * Initialize the Glyph Matrix Manager
@@ -109,17 +127,87 @@ class GlyphManager private constructor(private val context: Context) {
     }
     
     /**
-     * Flash the glyph 3 times with a bright pattern
+     * Schedule a flash based on urgency score.
+     * If autoFlash is disabled, stores the urgency for UI to trigger later.
+     * If autoFlash is enabled, waits for UI delay then flashes.
      */
-    fun flashThreeTimes() {
+    fun scheduleFlashForUrgency(urgencyScore: Int) {
+        Log.d(TAG, "Flash scheduled for urgency: $urgencyScore, autoFlash: $autoFlashEnabled")
+        
+        if (!autoFlashEnabled) {
+            // Store for UI to trigger
+            pendingFlashUrgency = urgencyScore
+            Log.d(TAG, "Flash queued - waiting for UI trigger")
+            return
+        }
+        
+        // Auto-flash enabled - wait for UI to update then flash
+        managerScope.launch {
+            delay(UI_READY_DELAY_MS)
+            flashForUrgency(urgencyScore)
+        }
+    }
+    
+    /**
+     * Get pending flash urgency (for UI to check)
+     */
+    fun getPendingFlashUrgency(): Int? = pendingFlashUrgency
+    
+    /**
+     * Clear pending flash (called when UI handles it)
+     */
+    fun clearPendingFlash() {
+        pendingFlashUrgency = null
+    }
+    
+    /**
+     * Trigger flash from UI based on urgency score.
+     * Different urgency levels get different flash patterns.
+     */
+    fun flashForUrgency(urgencyScore: Int) {
+        pendingFlashUrgency = null // Clear pending
+        
+        Log.d(TAG, "Flashing for urgency: $urgencyScore")
+        
+        when {
+            urgencyScore >= 6 -> {
+                // Critical: 5 rapid flashes
+                flashTimes(5, flashDuration = 150L, interval = 100L, brightness = 255)
+            }
+            urgencyScore >= 5 -> {
+                // Urgent: 4 flashes
+                flashTimes(4, flashDuration = 180L, interval = 120L, brightness = 255)
+            }
+            urgencyScore >= 4 -> {
+                // High: 3 flashes
+                flashTimes(3, flashDuration = 200L, interval = 150L, brightness = 230)
+            }
+            urgencyScore >= 3 -> {
+                // Medium: 2 flashes
+                flashTimes(2, flashDuration = 250L, interval = 200L, brightness = 200)
+            }
+            urgencyScore >= 2 -> {
+                // Low: 1 gentle flash
+                flashTimes(1, flashDuration = 300L, interval = 0L, brightness = 150)
+            }
+            else -> {
+                // Minimal: subtle pulse
+                flashTimes(1, flashDuration = 400L, interval = 0L, brightness = 100)
+            }
+        }
+    }
+    
+    /**
+     * Flash the glyph a specified number of times with customizable parameters
+     */
+    fun flashTimes(times: Int, flashDuration: Long = FLASH_DURATION_MS, interval: Long = FLASH_INTERVAL_MS, brightness: Int = 255) {
         if (!isInitialized) {
             Log.w(TAG, "GlyphManager not initialized, attempting to initialize...")
             initialize()
-            // Wait a bit for initialization
             managerScope.launch {
                 delay(1000)
                 if (isInitialized) {
-                    performFlash()
+                    performFlash(times, flashDuration, interval, brightness)
                 } else {
                     Log.e(TAG, "Failed to initialize GlyphManager for flashing")
                 }
@@ -127,34 +215,37 @@ class GlyphManager private constructor(private val context: Context) {
             return
         }
         
-        performFlash()
+        performFlash(times, flashDuration, interval, brightness)
     }
     
-    private fun performFlash() {
+    /**
+     * Legacy method: Flash 3 times with default settings
+     */
+    fun flashThreeTimes() {
+        flashTimes(3)
+    }
+    
+    private fun performFlash(times: Int = 3, flashDuration: Long = FLASH_DURATION_MS, interval: Long = FLASH_INTERVAL_MS, brightness: Int = 255) {
         managerScope.launch {
             try {
-                // Create a bright white bitmap for flashing
                 val flashBitmap = createFlashBitmap()
                 
-                // Flash 3 times
-                for (i in 1..3) {
-                    Log.d(TAG, "Flash $i of 3")
+                for (i in 1..times) {
+                    Log.d(TAG, "Flash $i of $times (brightness: $brightness)")
                     
                     // Turn on
-                    setGlyphFrame(flashBitmap, brightness = 255)
-                    delay(FLASH_DURATION_MS)
+                    setGlyphFrame(flashBitmap, brightness = brightness)
+                    delay(flashDuration)
                     
                     // Turn off
                     setGlyphFrame(null, brightness = 0)
-                    if (i < 3) {
-                        delay(FLASH_INTERVAL_MS)
+                    if (i < times) {
+                        delay(interval)
                     }
                 }
                 
-                // Ensure it's off after flashing
                 closeGlyph()
-                
-                Log.d(TAG, "3-flash sequence completed")
+                Log.d(TAG, "$times-flash sequence completed")
             } catch (e: Exception) {
                 Log.e(TAG, "Error during flash sequence", e)
             }
