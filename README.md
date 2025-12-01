@@ -22,7 +22,7 @@ Glyph-Glance intercepts notifications and processes them locally using **Cactus 
 
 The project is architected into three distinct, decoupled tracks to ensure separation of concerns between AI logic, system integration, and user experience.
 
-### 🧠 Track 1: The Brain (Core Logic & Data)
+### Part 1: The Brain (Core Logic & Data)
 
   * **Responsibility:** Pure logic, data persistence, and AI reasoning.
   * **Key Components:**
@@ -30,7 +30,7 @@ The project is architected into three distinct, decoupled tracks to ensure separ
       * **Rule Engine:** Matches incoming text against user-defined natural language rules (e.g., "Block everything unless it's Mom").
       * **Contact Profiling:** Maintains a local database of sender habits to identify "Split Texters".
 
-### 🫀 Track 2: The Body (System & Hardware)
+### Part 2: The Body (System & Hardware)
 
   * **Responsibility:** Android OS integration and physical hardware control.
   * **Key Components:**
@@ -38,7 +38,7 @@ The project is architected into three distinct, decoupled tracks to ensure separ
       * **Buffer Engine:** A state machine that catches rapid-fire messages and holds them in a queue before processing, reducing notification spam.
       * **Glyph Manager:** Controls the **Nothing Glyph Interface** via the GDK, translating AI decisions into light patterns (e.g., Red Strobe for Urgency).
 
-### 👁️ Track 3: The Face (UI & Configuration)
+### Part 3: The Face (UI & Configuration)
 
   * **Responsibility:** User interaction and visualization.
   * **Key Components:**
@@ -118,7 +118,3 @@ glyph-glance/
 ├── scripts/                   # Python Testing Tools
 └── gradle/                    # Build configuration
 ```
-
-This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=LICENSE) file for details.
-
-*Note: The Nothing Glyph SDK and Cactus SDK are subject to their respective license agreements.*
